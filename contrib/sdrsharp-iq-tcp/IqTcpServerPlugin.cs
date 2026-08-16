@@ -10,6 +10,7 @@ namespace SDRSharp.IqTcpServer
         private ISharpControl _control;
         private IqTcpServerPanel _panel;
         private readonly IqTcpServer _server = new IqTcpServer();
+        private readonly IqDdc _ddc = new IqDdc();
         private double _sampleRate;
 
         public string DisplayName => "IQ TCP Server (cf32)";
@@ -17,6 +18,7 @@ namespace SDRSharp.IqTcpServer
         public UserControl Gui => _panel;
 
         internal IqTcpServer Server => _server;
+        internal IqDdc Ddc => _ddc;
 
         public void Initialize(ISharpControl control)
         {
@@ -28,6 +30,30 @@ namespace SDRSharp.IqTcpServer
         public void Close()
         {
             _server.Stop();
+            _ddc.Dispose();
+        }
+
+        internal double VfoOffsetHz
+        {
+            get
+            {
+                if (_control == null) return 0.0;
+                try
+                {
+                    return (double)(_control.Frequency - _control.CenterFrequency);
+                }
+                catch
+                {
+                    return 0.0;
+                }
+            }
+        }
+
+        internal double SyncVfoOffset()
+        {
+            double offset = VfoOffsetHz;
+            _ddc.OffsetHz = _ddc.FollowVfo ? offset : 0.0;
+            return offset;
         }
 
 
@@ -39,6 +65,7 @@ namespace SDRSharp.IqTcpServer
             set
             {
                 _sampleRate = value;
+                _ddc.SampleRate = value;
                 if (_panel != null) _panel.SetSampleRate(value);
             }
         }
@@ -47,13 +74,8 @@ namespace SDRSharp.IqTcpServer
         {
             if (!Enabled || length <= 0) return;
 
-            int nbytes = length * 8;
-            var block = new byte[nbytes];
-            fixed (byte* dst = block)
-            {
-                Buffer.MemoryCopy(buffer, dst, nbytes, nbytes);
-            }
-            _server.Broadcast(block);
+            var block = _ddc.Process(buffer, length);
+            if (block != null && block.Length > 0) _server.Broadcast(block);
         }
     }
 }
