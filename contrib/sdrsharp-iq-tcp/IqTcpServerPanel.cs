@@ -240,7 +240,7 @@ namespace SDRSharp.IqTcpServer
                 ? fs.ToString("0.##", CultureInfo.InvariantCulture)
                 : "<start the radio>";
             _commandBox.Text = string.Format(CultureInfo.InvariantCulture,
-                "uv run stdt86 live tcp://127.0.0.1:{0} --offset 0 --fs {1} --fmt cf32",
+                "stdt86 live tcp://127.0.0.1:{0} --offset 0 --fs {1} --fmt cf32",
                 (int)_portBox.Value, fsText);
         }
 

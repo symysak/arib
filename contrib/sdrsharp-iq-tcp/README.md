@@ -58,7 +58,7 @@ dotnet build -c Release -p:RefsDir="C:\path\to\sdrplugins\lib"
 3. パネルに出ているコマンドをそのまま実行（`--fs` はパネルの Rate 表示と一致する値）:
 
    ```sh
-   uv run stdt86 live tcp://127.0.0.1:5555 --offset 0 --fs 64000 --fmt cf32
+   stdt86 live tcp://127.0.0.1:5555 --offset 0 --fs 64000 --fmt cf32
    # 別ホストの SDR# なら 127.0.0.1 をそのマシンの IP に
    ```
 4. **あとは SDR# のスペクトラムで目的のチャネルをクリックするだけ**。VFO オフセットは
@@ -83,7 +83,7 @@ dotnet build -c Release -p:RefsDir="C:\path\to\sdrplugins\lib"
   ±約 8.4 kHz なので余裕がある（`server/iq_recorder.py` が同じ 40 kHz 級の DDC 保存 →
   再デコードで元復号と一致することを実波で確認済み）。
 - 帯域も軽くなる: cf32 8 byte/sample なので 1.024 MS/s の素通しは ≈8 MB/s、64 kHz なら
-  ≈0.5 MB/s。Python 側の前段デシメーションも短くなる。
+  ≈0.5 MB/s。デコーダ側の前段デシメーションも短くなる。
 - **Decimate stream** を OFF にするとデバイスレートのまま DDC だけ行う（`--fs` はデバイスレート）。
 - **Follow VFO** を OFF にすると旧挙動（生 I/Q 素通し）。この場合はチャネルを SDR# の
   中心周波数側で合わせ、デコーダに `--offset <kHz>` を渡す運用になる。
