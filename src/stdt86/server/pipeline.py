@@ -16,6 +16,7 @@ from stdt86.server.state import LiveState
 CHUNK_SECONDS = 0.16
 SAMPLE_QUEUE_CHUNKS = 32
 CONTROL_RESET_S = 1.0
+INPUT_STALL_S = 2.0
 
 
 class Pipeline:
@@ -117,13 +118,27 @@ class Pipeline:
 
 
     def _read_loop(self) -> None:
+        stalled = False
+        last_data = time.monotonic()
         while not self._stop.is_set():
             try:
                 chunk = self.source.read(self._chunk)
             except Exception:
                 chunk = None
-            if chunk is None or len(chunk) == 0:
+            if chunk is None:
                 break
+            if len(chunk) == 0:
+                if not stalled and time.monotonic() - last_data >= INPUT_STALL_S:
+                    stalled = True
+                    self._emit(events.log_event(
+                        self.state.t,
+                        "入力が途絶えました（接続は維持。SDR# 側の再生停止など）。"
+                        "データ再開を待機します。"))
+                continue
+            if stalled:
+                stalled = False
+                self._emit(events.log_event(self.state.t, "入力が復帰しました。"))
+            last_data = time.monotonic()
             if not getattr(self.source, "lossy", True):
                 while not self._stop.is_set():
                     try:

@@ -39,3 +39,7 @@ src = ["src", "scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# 生成物（scripts/gen_city_codes.py が書く）。改正事由の原文をそのまま持つので長い行になる。
+"src/stdt86/data/city_codes.py" = ["E501"]

@@ -7,7 +7,12 @@ import numpy as np
 from stdt86.codec.s_codec import viterbi_decode
 from stdt86.dsp.burst import BITS_PER_SLOT
 from stdt86.fec.convolutional import CONTROL_K, CONTROL_POLYS, crc16_ccitt
-from stdt86.fec.scrambler import city_name, descramble, municipal_code_to_seed
+from stdt86.fec.scrambler import (
+    abolished_label,
+    city_name,
+    descramble,
+    municipal_code_to_seed,
+)
 
 CAC_OFFSET = 320
 CAC_LEN = 256
@@ -232,10 +237,16 @@ def decode_facch(tch_bits: np.ndarray, seed: int) -> ControlMessage:
     return msg
 
 
-def candidates_for_seed(seed: int) -> list[tuple[int, str]]:
-    from stdt86.data.city_codes import CITY_CODES
+def candidates_for_seed(seed: int, include_abolished: bool = True
+                        ) -> list[tuple[int, str]]:
+    from stdt86.data.city_codes import ABOLISHED_CITY_CODES, CITY_CODES
 
-    return [(c, n) for c, n in CITY_CODES.items() if (c & 0x1FF) == (seed & 0x1FF)]
+    s = seed & 0x1FF
+    out = [(c, n) for c, n in sorted(CITY_CODES.items()) if (c & 0x1FF) == s]
+    if include_abolished:
+        out += [(c, abolished_label(*v))
+                for c, v in sorted(ABOLISHED_CITY_CODES.items()) if (c & 0x1FF) == s]
+    return out
 
 
 def load_raw_slots(path: str, slots_per_frame: int = 6) -> list[np.ndarray]:

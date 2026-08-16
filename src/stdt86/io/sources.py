@@ -38,6 +38,9 @@ _FORMATS = {
 }
 
 
+_EMPTY = np.zeros(0, dtype=np.complex64)
+
+
 class IQSource(Protocol):
 
     fs: float
@@ -51,6 +54,8 @@ class IQSource(Protocol):
 
 class _SocketSource:
 
+    RECV_TIMEOUT = 1.0
+
     def __init__(self, host: str, port: int, fs: float, fmt: str = "cu8",
                  timeout: float = 10.0) -> None:
         if fmt not in _FORMATS:
@@ -59,7 +64,7 @@ class _SocketSource:
         self.lossy = True
         self._bps, self._conv = _FORMATS[fmt]
         self._sock = socket.create_connection((host, port), timeout=timeout)
-        self._sock.settimeout(timeout)
+        self._sock.settimeout(self.RECV_TIMEOUT)
         self._pending = b""
 
     def _recv_exact(self, nbytes: int) -> bytes | None:
@@ -76,9 +81,18 @@ class _SocketSource:
         return bytes(buf)
 
     def read(self, n: int) -> np.ndarray | None:
-        raw = self._recv_exact(n * self._bps)
-        if raw is None:
-            return None
+        need = n * self._bps
+        while len(self._pending) < need:
+            try:
+                chunk = self._sock.recv(min(65536, need - len(self._pending)))
+            except TimeoutError:
+                return _EMPTY
+            except OSError:
+                return None
+            if not chunk:
+                return None
+            self._pending += chunk
+        raw, self._pending = self._pending[:need], self._pending[need:]
         return self._conv(raw)
 
     def close(self) -> None:
@@ -98,10 +112,12 @@ class RtlTcpSource(_SocketSource):
                  freq_hz: float | None = None, agc: bool = True,
                  timeout: float = 10.0) -> None:
         super().__init__(host, port, fs, fmt="cu8", timeout=timeout)
+        self._sock.settimeout(timeout)
         header = self._recv_exact(12)
         if header is None or header[:4] != b"RTL0":
             self.close()
             raise ConnectionError("rtl_tcp ヘッダ（RTL0）を受信できませんでした。")
+        self._sock.settimeout(self.RECV_TIMEOUT)
         self.tuner_type = struct.unpack(">I", header[4:8])[0]
         self.tuner_gain_count = struct.unpack(">I", header[8:12])[0]
         self.center_hz = float(freq_hz) if freq_hz is not None else None

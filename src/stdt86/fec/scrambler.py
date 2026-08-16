@@ -13,9 +13,19 @@ def municipal_code_to_seed(code: int) -> int:
 
 
 def city_name(code: int) -> str | None:
-    from stdt86.data.city_codes import CITY_CODES
+    from stdt86.data.city_codes import ABOLISHED_CITY_CODES, CITY_CODES
 
-    return CITY_CODES.get(code)
+    name = CITY_CODES.get(code)
+    if name is not None:
+        return name
+    old = ABOLISHED_CITY_CODES.get(code)
+    return None if old is None else abolished_label(*old)
+
+
+def abolished_label(name: str, date: str, reason: str = "") -> str:
+    if reason:
+        return f"旧 {name}（{date}廃止 {reason}）"
+    return f"旧 {name}（{date}廃止）"
 
 
 def seed_for_city(name: str) -> dict[str, int]:
