@@ -1,11 +1,12 @@
-# Python
+# Go
+/stdt86
+/stdt86.exe
+*.test
+*.out
+
+# Python（補助スクリプトのみ）
 __pycache__/
 *.py[cod]
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.venv/
-uv.lock
 
 # Project artifacts
 figures/

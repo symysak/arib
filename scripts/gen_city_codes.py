@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent.parent / "src" / "stdt86" / "data" / "city_codes.py"
+OUT_DIR = Path(__file__).resolve().parent.parent / "internal" / "citycodes"
 ESTAT_BASE = "https://www.e-stat.go.jp/municipalities/cities/areacode"
 
 
@@ -186,34 +186,33 @@ def read_mic_codes(xlsx: Path) -> set[int]:
     return codes
 
 
-def write_module(mapping: dict[int, str],
-                 abolished: dict[int, tuple[str, str, str]]) -> None:
-    lines = [
-        '"""全国地方公共団体コード（標準地域コード）→ 市区町村名。',
-        "",
-        "STD-T86 のスクランブル値はこのコードの下位 9bit（1..511）。",
-        "コード体系・名称は総務省統計局「統計に用いる標準地域コード」の公開データ。",
-        "scripts/gen_city_codes.py で生成する。",
-        "",
-        "``ABOLISHED_CITY_CODES`` は合併等で廃止された旧コード → (名称, 廃止年月日, 移行先)。",
-        "免許時のコードを使い続ける親局があるため、スクランブル値からの候補列挙では",
-        "現行コードと併せて引く必要がある（旧郡名は履歴に無いので県＋旧名称のみ）。",
-        '"""',
-        "",
-        "from __future__ import annotations",
-        "",
-        "CITY_CODES: dict[int, str] = {",
-    ]
-    for code in sorted(mapping):
-        name = mapping[code].replace('"', '\\"')
-        lines.append(f'    {code}: "{name}",')
-    lines += ["}", "", "ABOLISHED_CITY_CODES: dict[int, tuple[str, str, str]] = {"]
-    for code in sorted(abolished):
-        cells = ", ".join(f'"{v.replace(chr(34), chr(92) + chr(34))}"'
-                          for v in abolished[code])
-        lines.append(f"    {code}: ({cells}),")
-    lines.append("}")
-    OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _clean(s: str) -> str:
+    return s.replace("\t", " ").replace("\n", " ").replace("\r", " ").strip()
+
+
+def write_tsv(mapping: dict[int, str],
+              abolished: dict[int, tuple[str, str, str]]) -> None:
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / "current.tsv").write_text(
+        "".join(f"{c}\t{_clean(n)}\n" for c, n in sorted(mapping.items())),
+        encoding="utf-8")
+    (OUT_DIR / "abolished.tsv").write_text(
+        "".join(f"{c}\t{_clean(name)}\t{_clean(date)}\t{_clean(reason)}\n"
+                for c, (name, date, reason) in sorted(abolished.items())),
+        encoding="utf-8")
+
+
+def read_existing_abolished() -> dict[int, tuple[str, str, str]]:
+    p = OUT_DIR / "abolished.tsv"
+    if not p.exists():
+        return {}
+    out: dict[int, tuple[str, str, str]] = {}
+    for ln in p.read_text(encoding="utf-8").splitlines():
+        if not ln.strip():
+            continue
+        f = ln.split("\t")
+        out[int(f[0])] = (f[1], f[2], f[3] if len(f) > 3 else "")
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -236,14 +235,10 @@ def main(argv: list[str]) -> int:
         print("廃置分合等情報（CSV 全件）から廃止コードを収集中…", file=sys.stderr)
         abolished = fetch_abolished(mapping)
     else:
-        try:
-            from stdt86.data.city_codes import ABOLISHED_CITY_CODES as prev
-            abolished = dict(prev)
-            print(f"廃止コードは既存の {len(abolished)} 件を保持", file=sys.stderr)
-        except Exception:
-            pass
-    write_module(mapping, abolished)
-    print(f"{OUT}: 現行 {len(mapping)} 件 / 廃止 {len(abolished)} 件を書き出しました。")
+        abolished = read_existing_abolished()
+        print(f"廃止コードは既存の {len(abolished)} 件を保持", file=sys.stderr)
+    write_tsv(mapping, abolished)
+    print(f"{OUT_DIR}: 現行 {len(mapping)} 件 / 廃止 {len(abolished)} 件を書き出しました。")
     return 0
 
 
