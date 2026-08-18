@@ -1,6 +1,8 @@
 # Go
 /stdt86
 /stdt86.exe
+/qpsknarrow
+/qpsknarrow.exe
 *.test
 *.out
 
@@ -13,6 +15,11 @@ figures/
 logs/
 
 build/
+
+# 配布 zip の組み立て（.github/scripts/package.{sh,ps1}）
+/dist/
+/pkg/
+/*.zip
 
 # Recorded I/Q captures (can be large)
 *.cu8

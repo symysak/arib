@@ -1,0 +1,243 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # タグを打つ前に組み上がりだけ確かめる用（Release は作らない）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            cc: gcc
+            expect: x86-64
+          - goarch: arm64
+            cc: aarch64-linux-gnu-gcc
+            expect: aarch64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: C ツールチェーンを用意
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu unzip zip
+
+      - name: G.722.1 をビルド（static リンク）
+        run: |
+          # build_g7221.sh は "$CC" を 1 語として実行するので、追加フラグは
+          # ラッパ経由で渡す（スクリプト側を release 都合で書き換えないため）。
+          # -static にするのは、runner の glibc より古い環境で
+          # 「音声だけ動かない」形の事故を避けるため。
+          printf '#!/bin/sh\nexec %s -static "$@"\n' '${{ matrix.cc }}' > "$RUNNER_TEMP/ccwrap"
+          chmod +x "$RUNNER_TEMP/ccwrap"
+          CC="$RUNNER_TEMP/ccwrap" bash scripts/std-t86/build_g7221.sh
+
+      - name: stdt86 をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86 ./cmd/std-t86
+
+      # ネイティブでしか回せないので amd64 のジョブだけで走らせる。
+      # data/ はリポジトリに入っていないので実キャプチャ回帰は skip される。
+
+      - name: テスト
+        if: matrix.goarch == 'amd64'
+        run: |
+          go vet ./cmd/std-t86/... ./internal/std-t86/...
+          go test ./internal/std-t86/...
+
+      - name: 生成物のアーキテクチャを確認
+        run: |
+          file dist/stdt86 build/g7221/g7221_sep_decode
+          file dist/stdt86                  | grep -q '${{ matrix.expect }}'
+          file build/g7221/g7221_sep_decode | grep -q '${{ matrix.expect }}'
+          file build/g7221/g7221_sep_decode | grep -q 'statically linked'
+
+      - name: zip を作る
+        run: bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/stdt86
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-linux-${{ matrix.goarch }}
+          path: "*.zip"
+          if-no-files-found: error
+
+  macos:
+    # arm64 の runner。x86_64 は clang の -arch でクロスする（両方の SDK が入っている）。
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: arm64
+            arch: arm64
+          - goarch: amd64
+            arch: x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: G.722.1 をビルド
+        run: |
+          # -mmacosx-version-min は、runner の SDK より古い macOS でも動くようにするため。
+          printf '#!/bin/sh\nexec cc -arch %s -mmacosx-version-min=11.0 "$@"\n' \
+            '${{ matrix.arch }}' > "$RUNNER_TEMP/ccwrap"
+          chmod +x "$RUNNER_TEMP/ccwrap"
+          CC="$RUNNER_TEMP/ccwrap" bash scripts/std-t86/build_g7221.sh
+
+      - name: stdt86 をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86 ./cmd/std-t86
+
+      - name: 生成物のアーキテクチャを確認
+        run: |
+          file dist/stdt86 build/g7221/g7221_sep_decode
+          test "$(lipo -archs dist/stdt86)" = '${{ matrix.arch }}'
+          test "$(lipo -archs build/g7221/g7221_sep_decode)" = '${{ matrix.arch }}'
+
+      - name: zip を作る
+        run: bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/stdt86
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-darwin-${{ matrix.goarch }}
+          path: "*.zip"
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: MinGW-w64 を用意
+        shell: pwsh
+        run: |
+          # build_g7221.ps1 は gcc 系のフラグ体系を前提にしている（MSVC cl は非対応）。
+          # runner イメージに mingw が入っていることもあるので、無いときだけ入れる。
+          if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) {
+            choco install mingw -y --no-progress
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+          }
+          # refreshenv の効果はこのステップ限りなので、gcc のあるディレクトリを
+          # 後続ステップへ引き継ぐ（PATH 全体を流し込むと並び順が壊れる）。
+          $gcc = Get-Command gcc -ErrorAction Stop
+          Split-Path -Parent $gcc.Source | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $gcc.Source --version
+          & $gcc.Source -dumpmachine
+
+      - name: G.722.1 をビルド
+        shell: pwsh
+        run: |
+          $m = (gcc -dumpmachine)
+          if ($m -notmatch 'x86_64') { throw "x86_64 の gcc ではない: $m" }
+          & ./scripts/std-t86/build_g7221.ps1
+
+      - name: stdt86 をビルド
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86.exe ./cmd/std-t86
+
+      # SDR# の I/Q を TCP で流すプラグイン（contrib/sdrsharp-iq-tcp）。
+      # 参照 DLL（SDRSharp.Common / SDRSharp.Radio）は build.ps1 が公式プラグイン SDK の
+      # zip を取ってきて refs/ へ展開する。**外部の配布 URL に依存する**ので、ここが
+      # 落ちたら Release も止まる（同梱漏れに気づかないより止まるほうがよい）。
+      # csproj は参照のみ（<Private>false</Private>）なので出力に SDR# 本体は入らない。
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: SDR# プラグインをビルド
+        shell: pwsh
+        run: |
+          & ./contrib/sdrsharp-iq-tcp/build.ps1 -Configuration Release
+          $dll = 'contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll'
+          if (-not (Test-Path -LiteralPath $dll)) { throw "プラグイン DLL が出来ていない: $dll" }
+          Get-Item $dll | Select-Object FullName, Length
+
+      - name: zip を作る
+        shell: pwsh
+        run: |
+          .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/stdt86.exe `
+            -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-windows-amd64
+          path: "*.zip"
+          if-no-files-found: error
+
+  release:
+    # workflow_dispatch では組み上がりの確認だけして Release は作らない
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: zip-*
+          merge-multiple: true
+
+      - name: チェックサム
+        run: |
+          cd dist
+          ls -la
+          sha256sum ./*.zip | tee SHA256SUMS.txt
+
+      - name: リリースノートを組む
+        run: bash .github/scripts/release_notes.sh "$GITHUB_REF_NAME" > notes.md
+
+      - name: Release を作る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # ハイフンを含むタグ（v1.2.0-rc1 等）はプレリリースにする
+          case "$GITHUB_REF_NAME" in
+            *-*) PRE=--prerelease ;;
+            *)   PRE= ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag \
+            $PRE \
+            dist/*.zip dist/SHA256SUMS.txt

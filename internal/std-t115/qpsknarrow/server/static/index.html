@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STD-T115 QPSK ナロー 受信モニタ</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+<div class="linkbar" id="pane-link"></div>
+
+<div class="grid">
+  <section class="card s4" id="pane-control">
+    <h2>制御チャネル / 局情報<span class="sub" id="control-sub"></span></h2>
+    <div class="body" id="control-body"></div>
+  </section>
+
+  <section class="card s5" id="pane-quality">
+    <h2>品質トレンド<span class="sub" id="quality-sub"></span></h2>
+    <div class="body" id="quality-body"></div>
+  </section>
+
+  <section class="card s3" id="pane-signal">
+    <h2>コンスタレーション<span class="sub">QPSK</span></h2>
+    <div class="body" id="signal-body"></div>
+  </section>
+
+  <section class="card s8" id="pane-broadcast">
+    <h2>通報（放送）<span class="sub" id="broadcast-sub"></span></h2>
+    <div class="body" id="broadcast-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-audio">
+    <h2>音声<span class="sub" id="audio-sub"></span></h2>
+    <div class="body" id="audio-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-inspector">
+    <h2>メッセージインスペクタ<span class="sub" id="inspector-sub"></span></h2>
+    <div id="inspector-toolbar" class="toolbar"></div>
+    <div class="inspector">
+      <div class="vcol">
+        <div id="inspector-head"></div>
+        <div class="vscroll" id="inspector-scroll">
+          <div class="spacer" id="inspector-spacer">
+            <div class="rows" id="inspector-rows"></div>
+          </div>
+        </div>
+      </div>
+      <div class="detail" id="inspector-detail"></div>
+    </div>
+  </section>
+
+  <section class="card s3">
+    <h2>メッセージ種別<span class="sub">累計</span></h2>
+    <div class="body hist" id="hist-type"></div>
+  </section>
+  <section class="card s3">
+    <h2>機能チャネル<span class="sub">累計</span></h2>
+    <div class="body hist" id="hist-ch"></div>
+  </section>
+
+  <section class="card s6" id="pane-system">
+    <h2>システム<span class="sub" id="system-sub"></span></h2>
+    <div class="body" id="system-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-log">
+    <h2>デコードログ<span class="sub" id="log-sub"></span></h2>
+    <div class="logfilters" id="log-filters">
+      <label><input type="checkbox" data-group="control" checked> 制御</label>
+      <label><input type="checkbox" data-group="broadcast" checked> 通報</label>
+      <label><input type="checkbox" data-group="audio" checked> 音声</label>
+      <label><input type="checkbox" data-group="system" checked> システム</label>
+    </div>
+    <pre class="log" id="log-body"></pre>
+  </section>
+</div>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>
