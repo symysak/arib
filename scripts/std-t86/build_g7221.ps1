@@ -1,8 +1,8 @@
 ﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
-$RepoRoot = Split-Path -Parent $PSScriptRoot
-$Src = Join-Path $RepoRoot 'T-REC-G.722.1-200505-I!!SOFT-ZST-E\Software\Fixed-200505-Rel.2.1'
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$Src = Join-Path $RepoRoot 'third_party\T-REC-G.722.1-200505-I!!SOFT-ZST-E\Software\Fixed-200505-Rel.2.1'
 $OutDir = Join-Path $RepoRoot 'build\g7221'
 $Work = Join-Path ([IO.Path]::GetTempPath()) ("g7221_build_" + [Guid]::NewGuid().ToString('N'))
 
@@ -66,7 +66,7 @@ try {
         if ($LASTEXITCODE) { throw "g7221_decode のビルドに失敗しました (exit $LASTEXITCODE)" }
 
         Write-Host '[4/5] S-Codec 適応分離パッチ（ARIB STD-T86 §5.6）→ g7221_sep_decode...'
-        $PatchCmd = @($Python) + @((Join-Path $RepoRoot 'scripts\patch_g7221_scodec.py'), $B)
+        $PatchCmd = @($Python) + @((Join-Path $RepoRoot 'scripts\std-t86\patch_g7221_scodec.py'), $B)
         & $PatchCmd[0] $PatchCmd[1..($PatchCmd.Length - 1)]
         if ($LASTEXITCODE) { throw "patch_g7221_scodec.py が失敗しました (exit $LASTEXITCODE)" }
         & $CC -O2 -w -o (Join-Path $OutDir 'g7221_sep_decode.exe') decode.c @Libs

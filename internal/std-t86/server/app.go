@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/symysak/stdt86/internal/fec"
-	"github.com/symysak/stdt86/internal/wavio"
+	"github.com/symysak/stdt86/internal/std-t86/fec"
+	"github.com/symysak/stdt86/internal/std-t86/wavio"
 )
 
 

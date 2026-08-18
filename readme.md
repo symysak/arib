@@ -10,9 +10,9 @@ S-Codec 音声デコードまでを行って、ブラウザのライブモニタ
 ## ビルド
 
 ```sh
-go build -o stdt86 ./cmd/stdt86
-bash scripts/build_g7221.sh    # 同梱 ITU G.722.1 をパッチ・ビルド → build/g7221/
-pwsh scripts/build_g7221.ps1   # Windows 版（MinGW-w64 の gcc/clang が必要。MSVC cl は非対応）
+go build -o stdt86 ./cmd/std-t86
+bash scripts/std-t86/build_g7221.sh    # 同梱 ITU G.722.1 をパッチ・ビルド → build/g7221/
+pwsh scripts/std-t86/build_g7221.ps1   # Windows 版（MinGW-w64 の gcc/clang が必要。MSVC cl は非対応）
 ```
 
 G.722.1 のビルドには C コンパイラと Python 3（標準ライブラリのみ）が要る。無くても制御チャネルの

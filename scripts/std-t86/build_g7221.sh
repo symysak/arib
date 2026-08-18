@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$REPO_ROOT/T-REC-G.722.1-200505-I!!SOFT-ZST-E/Software/Fixed-200505-Rel.2.1"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SRC="$REPO_ROOT/third_party/T-REC-G.722.1-200505-I!!SOFT-ZST-E/Software/Fixed-200505-Rel.2.1"
 OUT_DIR="$REPO_ROOT/build/g7221"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -31,7 +31,7 @@ echo "    compiler: $CC"
 "$CC" -O2 -w -o "$OUT_DIR/g7221_decode" decode.c $LIBS -lm
 
 echo "[4/5] S-Codec 適応分離パッチ（ARIB STD-T86 §5.6）→ g7221_sep_decode..."
-python3 "$REPO_ROOT/scripts/patch_g7221_scodec.py" "$B"
+python3 "$REPO_ROOT/scripts/std-t86/patch_g7221_scodec.py" "$B"
 "$CC" -O2 -w -o "$OUT_DIR/g7221_sep_decode" decode.c $LIBS -lm
 "$CC" -O2 -w -o "$OUT_DIR/g7221_encode" encode.c $LIBS -lm
 

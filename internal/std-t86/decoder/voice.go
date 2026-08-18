@@ -1,6 +1,6 @@
 package decoder
 
-import "github.com/symysak/stdt86/internal/dsp"
+import "github.com/symysak/stdt86/internal/std-t86/dsp"
 
 type voiceSmoother struct {
 	win     int

@@ -3,8 +3,8 @@ package control
 import (
 	"sort"
 
-	"github.com/symysak/stdt86/internal/citycodes"
-	"github.com/symysak/stdt86/internal/fec"
+	"github.com/symysak/stdt86/internal/std-t86/citycodes"
+	"github.com/symysak/stdt86/internal/std-t86/fec"
 )
 
 type SeedScore struct {

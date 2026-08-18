@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/symysak/stdt86/internal/fec"
-	"github.com/symysak/stdt86/internal/g7221"
-	"github.com/symysak/stdt86/internal/iq"
-	"github.com/symysak/stdt86/internal/server"
+	"github.com/symysak/stdt86/internal/std-t86/fec"
+	"github.com/symysak/stdt86/internal/std-t86/g7221"
+	"github.com/symysak/stdt86/internal/std-t86/iq"
+	"github.com/symysak/stdt86/internal/std-t86/server"
 )
 
 func main() {

@@ -9,10 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/symysak/stdt86/internal/citycodes"
-	"github.com/symysak/stdt86/internal/control"
-	"github.com/symysak/stdt86/internal/decoder"
-	"github.com/symysak/stdt86/internal/iq"
+	"github.com/symysak/stdt86/internal/std-t86/citycodes"
+	"github.com/symysak/stdt86/internal/std-t86/control"
+	"github.com/symysak/stdt86/internal/std-t86/decoder"
+	"github.com/symysak/stdt86/internal/std-t86/iq"
 )
 
 const (

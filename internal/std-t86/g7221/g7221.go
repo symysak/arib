@@ -44,8 +44,8 @@ func binaryPath(name string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("%s が見つかりません。`bash scripts/build_g7221.sh`"+
-		"（Windows は `pwsh scripts/build_g7221.ps1`）を実行してください"+
+	return "", fmt.Errorf("%s が見つかりません。`bash scripts/std-t86/build_g7221.sh`"+
+		"（Windows は `pwsh scripts/std-t86/build_g7221.ps1`）を実行してください"+
 		"（または STDT86_G7221_DIR を設定）", name)
 }
 

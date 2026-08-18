@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/symysak/stdt86/internal/citycodes"
-	"github.com/symysak/stdt86/internal/g7221"
-	"github.com/symysak/stdt86/internal/scodec"
-	"github.com/symysak/stdt86/internal/wavio"
+	"github.com/symysak/stdt86/internal/std-t86/citycodes"
+	"github.com/symysak/stdt86/internal/std-t86/g7221"
+	"github.com/symysak/stdt86/internal/std-t86/scodec"
+	"github.com/symysak/stdt86/internal/std-t86/wavio"
 )
 
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
-static="$root/internal/server/static"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+static="$root/internal/std-t86/server/static"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 

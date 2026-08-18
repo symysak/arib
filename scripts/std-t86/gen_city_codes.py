@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
-OUT_DIR = Path(__file__).resolve().parent.parent / "internal" / "citycodes"
+OUT_DIR = Path(__file__).resolve().parent.parent.parent / "internal" / "std-t86" / "citycodes"
 ESTAT_BASE = "https://www.e-stat.go.jp/municipalities/cities/areacode"
 
 

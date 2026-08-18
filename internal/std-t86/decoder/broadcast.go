@@ -1,8 +1,8 @@
 package decoder
 
 import (
-	"github.com/symysak/stdt86/internal/control"
-	"github.com/symysak/stdt86/internal/dsp"
+	"github.com/symysak/stdt86/internal/std-t86/control"
+	"github.com/symysak/stdt86/internal/std-t86/dsp"
 )
 
 const slotSamples = dsp.SymbolsPerSlot * dsp.SPS

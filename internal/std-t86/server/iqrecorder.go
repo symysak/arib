@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/symysak/stdt86/internal/dsp"
-	"github.com/symysak/stdt86/internal/wavio"
+	"github.com/symysak/stdt86/internal/std-t86/dsp"
+	"github.com/symysak/stdt86/internal/std-t86/wavio"
 )
 
 
