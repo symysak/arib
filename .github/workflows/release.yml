@@ -16,16 +16,25 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    # **両アーキテクチャともネイティブのランナーで組む（apt を一切踏まない）。**
+    # 以前は amd64 のランナーから aarch64 へクロスしていたが、apt に依存するのが
+    # 弱点だった: gcc-aarch64-linux-gnu は libc6-dev-arm64-cross を Recommends に
+    # しているので --no-install-recommends では入らず、target のヘッダが無いまま
+    # host の /usr/include へ落ちて全ファイルが fatal error になる。明示しても今度は
+    # azure のミラーが全て Ign を返した回に archive.ubuntu.com へのフォールバックが
+    # 10 分以上無応答になり、リリースごと止まった。ネイティブなら gcc・libc・libc.a・
+    # unzip・zip が最初から揃っているので、この経路が丸ごと消える。
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - goarch: amd64
-            cc: gcc
+            runner: ubuntu-24.04
             expect: x86-64
           - goarch: arm64
-            cc: aarch64-linux-gnu-gcc
+            runner: ubuntu-24.04-arm
             expect: aarch64
     steps:
       - uses: actions/checkout@v4
@@ -35,11 +44,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: C ツールチェーンを用意
+      # apt はしない。ランナーの gcc / libc.a / unzip / zip をそのまま使う。
+      # ここで疎通を確かめておけば、道具が欠けたときに ITU のビルドの奥ではなく
+      # この行で分かる（ヘッダ不足のエラーが 12 個並ぶログからは原因に辿り着けない）。
+      - name: C ツールチェーンを確認
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu unzip zip
+          command -v unzip >/dev/null || { echo "unzip がありません" >&2; exit 1; }
+          command -v zip   >/dev/null || { echo "zip がありません" >&2; exit 1; }
+          printf 'int main(void){return 0;}\n' > "$RUNNER_TEMP/probe.c"
+          gcc -static -o "$RUNNER_TEMP/probe" "$RUNNER_TEMP/probe.c"
+          file "$RUNNER_TEMP/probe"
+          file "$RUNNER_TEMP/probe" | grep -q '${{ matrix.expect }}'
+          file "$RUNNER_TEMP/probe" | grep -q 'statically linked'
 
       - name: G.722.1 をビルド（static リンク）
         run: |
@@ -47,7 +63,7 @@ jobs:
           # ラッパ経由で渡す（スクリプト側を release 都合で書き換えないため）。
           # -static にするのは、runner の glibc より古い環境で
           # 「音声だけ動かない」形の事故を避けるため。
-          printf '#!/bin/sh\nexec %s -static "$@"\n' '${{ matrix.cc }}' > "$RUNNER_TEMP/ccwrap"
+          printf '#!/bin/sh\nexec gcc -static "$@"\n' > "$RUNNER_TEMP/ccwrap"
           chmod +x "$RUNNER_TEMP/ccwrap"
           CC="$RUNNER_TEMP/ccwrap" bash scripts/std-t86/build_g7221.sh
 
@@ -58,11 +74,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -ldflags "-s -w" -o dist/stdt86 ./cmd/std-t86
 
-      # ネイティブでしか回せないので amd64 のジョブだけで走らせる。
-      # data/ はリポジトリに入っていないので実キャプチャ回帰は skip される。
-
+      # 両方ネイティブになったので両アーキテクチャで走らせる（並列なので
+      # クリティカルパスは伸びない）。data/ はリポジトリに入っていないので
+      # 実キャプチャ回帰は skip される。
       - name: テスト
-        if: matrix.goarch == 'amd64'
         run: |
           go vet ./cmd/std-t86/... ./internal/std-t86/...
           go test ./internal/std-t86/...
@@ -86,6 +101,7 @@ jobs:
   macos:
     # arm64 の runner。x86_64 は clang の -arch でクロスする（両方の SDK が入っている）。
     runs-on: macos-15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -134,6 +150,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -208,6 +225,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [linux, macos, windows]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
