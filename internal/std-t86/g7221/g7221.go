@@ -95,7 +95,7 @@ func Decode(frames [][]uint8, scodec bool) ([]float32, error) {
 		return nil, err
 	}
 
-	dir, err := os.MkdirTemp("", "stdt86-g7221-")
+	dir, err := os.MkdirTemp("", "std-t86-g7221-")
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func AdaptiveMultiplex(frames [][]uint8) ([][]uint8, error) {
 		return nil, err
 	}
 
-	dir, err := os.MkdirTemp("", "stdt86-g7221-")
+	dir, err := os.MkdirTemp("", "std-t86-g7221-")
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func Encode(pcm []float32) ([][]uint8, error) {
 		return nil, err
 	}
 
-	dir, err := os.MkdirTemp("", "stdt86-g7221-")
+	dir, err := os.MkdirTemp("", "std-t86-g7221-")
 	if err != nil {
 		return nil, err
 	}

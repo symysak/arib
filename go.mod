@@ -1,4 +1,4 @@
-module github.com/symysak/stdt86
+module github.com/symysak/arib
 
 go 1.26.6
 

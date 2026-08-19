@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/symysak/stdt86/internal/std-t86/citycodes"
-	"github.com/symysak/stdt86/internal/std-t86/control"
+	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/std-t86/control"
 )
 
 

@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/server"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/server"
 )
 
 func cmdLive(argv []string) int {
@@ -29,7 +29,7 @@ func cmdLive(argv []string) int {
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `ARIB STD-T115 QPSK ナロー方式 ライブ Web モニタ
 
-  qpsknarrow live <source> [オプション]
+  std-t115-qpsknarrow live <source> [オプション]
 
 <source>:
   録音ファイル (.wav / .cf32 / .cu8)   実時間ペースで再生（-full-speed で全速）

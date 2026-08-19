@@ -1,6 +1,6 @@
 package municipality
 
-import "github.com/symysak/stdt86/internal/std-t86/citycodes"
+import "github.com/symysak/arib/internal/std-t86/citycodes"
 
 
 type Info struct {

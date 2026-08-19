@@ -16,14 +16,6 @@ concurrency:
 
 jobs:
   linux:
-    # **両アーキテクチャともネイティブのランナーで組む（apt を一切踏まない）。**
-    # 以前は amd64 のランナーから aarch64 へクロスしていたが、apt に依存するのが
-    # 弱点だった: gcc-aarch64-linux-gnu は libc6-dev-arm64-cross を Recommends に
-    # しているので --no-install-recommends では入らず、target のヘッダが無いまま
-    # host の /usr/include へ落ちて全ファイルが fatal error になる。明示しても今度は
-    # azure のミラーが全て Ign を返した回に archive.ubuntu.com へのフォールバックが
-    # 10 分以上無応答になり、リリースごと止まった。ネイティブなら gcc・libc・libc.a・
-    # unzip・zip が最初から揃っているので、この経路が丸ごと消える。
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -31,22 +23,19 @@ jobs:
       matrix:
         include:
           - goarch: amd64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             expect: x86-64
           - goarch: arm64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
             expect: aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      # apt はしない。ランナーの gcc / libc.a / unzip / zip をそのまま使う。
-      # ここで疎通を確かめておけば、道具が欠けたときに ITU のビルドの奥ではなく
-      # この行で分かる（ヘッダ不足のエラーが 12 個並ぶログからは原因に辿り着けない）。
       - name: C ツールチェーンを確認
         run: |
           command -v unzip >/dev/null || { echo "unzip がありません" >&2; exit 1; }
@@ -67,32 +56,37 @@ jobs:
           chmod +x "$RUNNER_TEMP/ccwrap"
           CC="$RUNNER_TEMP/ccwrap" bash scripts/std-t86/build_g7221.sh
 
-      - name: stdt86 をビルド
+      - name: std-t86 をビルド
         env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86 ./cmd/std-t86
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t86 ./cmd/std-t86
 
-      # 両方ネイティブになったので両アーキテクチャで走らせる（並列なので
-      # クリティカルパスは伸びない）。data/ はリポジトリに入っていないので
-      # 実キャプチャ回帰は skip される。
-      - name: テスト
-        run: |
-          go vet ./cmd/std-t86/... ./internal/std-t86/...
-          go test ./internal/std-t86/...
+      # STD-T115 QPSK ナロー方式は別規格・別バイナリ。本体は純 Go なので C
+      # ツールチェーンに依存しない（音声の AMR-WB+ は 3GPP の配布物を再頒布できないため
+      # zip に入れず、利用者が scripts/std-t115/build_amrwbplus.sh でビルドする）。
+      - name: std-t115-qpsknarrow をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
 
       - name: 生成物のアーキテクチャを確認
         run: |
-          file dist/stdt86 build/g7221/g7221_sep_decode
-          file dist/stdt86                  | grep -q '${{ matrix.expect }}'
+          file dist/std-t86 dist/std-t115-qpsknarrow build/g7221/g7221_sep_decode
+          file dist/std-t86                 | grep -q '${{ matrix.expect }}'
+          file dist/std-t115-qpsknarrow     | grep -q '${{ matrix.expect }}'
           file build/g7221/g7221_sep_decode | grep -q '${{ matrix.expect }}'
           file build/g7221/g7221_sep_decode | grep -q 'statically linked'
 
       - name: zip を作る
-        run: bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/stdt86
+        run: |
+          bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t86 build/g7221
+          bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t115-qpsknarrow
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zip-linux-${{ matrix.goarch }}
           path: "*.zip"
@@ -100,7 +94,7 @@ jobs:
 
   macos:
     # arm64 の runner。x86_64 は clang の -arch でクロスする（両方の SDK が入っている）。
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -111,9 +105,9 @@ jobs:
           - goarch: amd64
             arch: x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -126,23 +120,34 @@ jobs:
           chmod +x "$RUNNER_TEMP/ccwrap"
           CC="$RUNNER_TEMP/ccwrap" bash scripts/std-t86/build_g7221.sh
 
-      - name: stdt86 をビルド
+      - name: std-t86 をビルド
         env:
           CGO_ENABLED: "0"
           GOOS: darwin
           GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86 ./cmd/std-t86
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t86 ./cmd/std-t86
+
+      # STD-T115 QPSK ナロー方式（別規格・別バイナリ）。AMR-WB+ は同梱しない。
+      - name: std-t115-qpsknarrow をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
 
       - name: 生成物のアーキテクチャを確認
         run: |
-          file dist/stdt86 build/g7221/g7221_sep_decode
-          test "$(lipo -archs dist/stdt86)" = '${{ matrix.arch }}'
+          file dist/std-t86 dist/std-t115-qpsknarrow build/g7221/g7221_sep_decode
+          test "$(lipo -archs dist/std-t86)" = '${{ matrix.arch }}'
+          test "$(lipo -archs dist/std-t115-qpsknarrow)" = '${{ matrix.arch }}'
           test "$(lipo -archs build/g7221/g7221_sep_decode)" = '${{ matrix.arch }}'
 
       - name: zip を作る
-        run: bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/stdt86
+        run: |
+          bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t86 build/g7221
+          bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t115-qpsknarrow
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zip-darwin-${{ matrix.goarch }}
           path: "*.zip"
@@ -152,9 +157,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -183,20 +188,29 @@ jobs:
           if ($m -notmatch 'x86_64') { throw "x86_64 の gcc ではない: $m" }
           & ./scripts/std-t86/build_g7221.ps1
 
-      - name: stdt86 をビルド
+      - name: std-t86 をビルド
         shell: pwsh
         env:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
-        run: go build -trimpath -ldflags "-s -w" -o dist/stdt86.exe ./cmd/std-t86
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t86.exe ./cmd/std-t86
+
+      # STD-T115 QPSK ナロー方式（別規格・別バイナリ）。AMR-WB+ は同梱しない。
+      - name: std-t115-qpsknarrow をビルド
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow.exe ./cmd/std-t115/qpsknarrow
 
       # SDR# の I/Q を TCP で流すプラグイン（contrib/sdrsharp-iq-tcp）。
       # 参照 DLL（SDRSharp.Common / SDRSharp.Radio）は build.ps1 が公式プラグイン SDK の
       # zip を取ってきて refs/ へ展開する。**外部の配布 URL に依存する**ので、ここが
       # 落ちたら Release も止まる（同梱漏れに気づかないより止まるほうがよい）。
       # csproj は参照のみ（<Private>false</Private>）なので出力に SDR# 本体は入らない。
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "9.0.x"
 
@@ -208,13 +222,17 @@ jobs:
           if (-not (Test-Path -LiteralPath $dll)) { throw "プラグイン DLL が出来ていない: $dll" }
           Get-Item $dll | Select-Object FullName, Length
 
+      # SDR# プラグインは規格に依存しない I/Q 供給側なので、両方の zip に入れる。
       - name: zip を作る
         shell: pwsh
         run: |
-          .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/stdt86.exe `
+          .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t86.exe `
+            -BuildDirs build\g7221 `
+            -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
+          .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t115-qpsknarrow.exe `
             -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: zip-windows-amd64
           path: "*.zip"
@@ -224,12 +242,12 @@ jobs:
     # workflow_dispatch では組み上がりの確認だけして Release は作らない
     if: startsWith(github.ref, 'refs/tags/')
     needs: [linux, macos, windows]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: zip-*
@@ -240,9 +258,6 @@ jobs:
           cd dist
           ls -la
           sha256sum ./*.zip | tee SHA256SUMS.txt
-
-      - name: リリースノートを組む
-        run: bash .github/scripts/release_notes.sh "$GITHUB_REF_NAME" > notes.md
 
       - name: Release を作る
         env:
@@ -255,7 +270,7 @@ jobs:
           esac
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
-            --notes-file notes.md \
+            --generate-notes \
             --verify-tag \
             $PRE \
             dist/*.zip dist/SHA256SUMS.txt

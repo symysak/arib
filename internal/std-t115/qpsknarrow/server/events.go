@@ -3,8 +3,8 @@ package server
 import (
 	"encoding/json"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/control"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/municipality"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/control"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/municipality"
 )
 
 const (

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/dsp"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/dsp"
 )
 
 const (

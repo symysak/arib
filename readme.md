@@ -7,31 +7,62 @@
 
 | 規格 | 変調 | バイナリ |
 |---|---|---|
-| ARIB STD-T86 | 16QAM TDMA-TDD | `stdt86` |
-| ARIB STD-T115 QPSK ナロー方式 | QPSK SCPC（7.5kHz 間隔） | `qpsknarrow` |
+| ARIB STD-T86 | 16QAM TDMA-TDD | `std-t86` |
+| ARIB STD-T115 QPSK ナロー方式 | QPSK SCPC（7.5kHz 間隔） | `std-t115-qpsknarrow` |
 
 自分の地域がどちらかは、受信して同期するほうを使えばよい。以下の手順はどちらも同じで、
 コマンド名とオプションの書式（`--fs` / `-fs`）だけが違う。
 
-## 1. ビルド
+## 1. ダウンロードする
 
-Go と C コンパイラ、Python 3（標準ライブラリのみ）が要る。
+**ビルドは要らない。** [Releases](https://github.com/symysak/arib/releases/latest) から
+規格と OS / CPU に合う zip を落として展開するだけで動く（Go も C コンパイラも不要）。
+
+zip 名は `<バイナリ名>-<バージョン>-<OS>-<CPU>.zip`。
+
+| OS / CPU | zip |
+|---|---|
+| Windows (x64) | `std-t86-…-windows-amd64.zip` / `std-t115-qpsknarrow-…-windows-amd64.zip` |
+| macOS (Apple Silicon) | `…-darwin-arm64.zip` |
+| macOS (Intel) | `…-darwin-amd64.zip` |
+| Linux (x86_64) | `…-linux-amd64.zip` |
+| Linux (aarch64) | `…-linux-arm64.zip` |
+
+Windows on ARM 向けは配布していない（x64 版がエミュレーションで動く）。
+チェックサムは同じページの `SHA256SUMS.txt`。
+
+展開したフォルダの中身:
+
+- `std-t86` / `std-t115-qpsknarrow`（Windows は `.exe`）— 本体。Web モニタの画面と
+  市区町村コード表はバイナリに埋め込んであるので、これ 1 個で動く
+- `build/g7221/` — `std-t86` の zip のみ。音声デコーダ（ITU-T G.722.1）。
+  **実行ファイルと同じ場所に置いたままにすること**（実行ファイルからの相対位置で探すので、
+  消すと音声だけ出なくなる。受信と制御チャネルの復号は動く）
+- `sdrsharp-plugin/` — Windows 版のみ。SDR# から I/Q を TCP で流すプラグイン（手順 2）
+- `readme.md` — これ
+
+### macOS は初回だけ検疫属性を外す
+
+署名していないので、ダウンロードした zip には Gatekeeper の検疫属性が付く。
 
 ```sh
-# デコーダ本体
-go build -o stdt86     ./cmd/std-t86
-go build -o qpsknarrow ./cmd/std-t115/qpsknarrow
-
-# 音声デコーダ（使うほうだけでよい）
-bash scripts/std-t86/build_g7221.sh        # STD-T86 用（G.722.1）
-bash scripts/std-t115/build_amrwbplus.sh   # STD-T115 用（AMR-WB+）
+xattr -dr com.apple.quarantine <展開したフォルダ>
 ```
 
-Windows は `pwsh scripts/std-t86/build_g7221.ps1` /
-`pwsh scripts/std-t115/build_amrwbplus.ps1`（MinGW-w64 の gcc/clang が要る。MSVC cl は非対応）。
+### STD-T115 の音声だけはビルドが要る
 
-**音声デコーダのビルドは必須ではない**が、無いと**音が出ない**（制御チャネルの復号と画面表示は
-動く）。AMR-WB+ の参照ソースは再頒布できないため、スクリプトが取得・パッチ・ビルドまでを行う。
+`std-t115-qpsknarrow` の zip には **AMR-WB+（3GPP TS 26.304）を同梱していない**。3GPP の
+配布物は書面の許可なく再頒布できないため。音を出すにはソースツリーで
+
+```sh
+bash scripts/std-t115/build_amrwbplus.sh      # Windows: pwsh scripts/std-t115/build_amrwbplus.ps1
+```
+
+を実行し、出来た `build/amrwbplus/` を実行ファイルの隣へ置く（C コンパイラが要る。
+Windows は MinGW-w64 の gcc/clang。MSVC の cl は非対応）。制御チャネルの復号と画面表示は
+zip の中身だけで動く。
+
+`std-t86` の音声（G.722.1）は zip に入っているので、そのまま音が出る。
 
 ## 2. SDR 側を待ち受けにする
 
@@ -39,9 +70,10 @@ Windows は `pwsh scripts/std-t86/build_g7221.ps1` /
 
 ### SDR#（Windows）
 
-同梱プラグイン `contrib/sdrsharp-iq-tcp/` をビルドして `Plugins\` へ入れると、右ペインに
-**"IQ TCP Server (cf32)"** が出る（詳細は同ディレクトリの README）。放送のチャネルへ同調して
-再生（▶）→ **Start server**。パネルに表示される送出レートを `--fs` に渡す。
+zip の `sdrsharp-plugin\SDRSharp.IqTcpServer.dll` を SDR# の `Plugins\` フォルダへコピーし、
+**`SDRSharp.dotnet9.exe`（.NET 9 ホスト）**で SDR# を起動すると、右ペインに
+**"IQ TCP Server (cf32)"** が出る（詳細は `sdrsharp-plugin\README.md`）。放送のチャネルへ
+同調して再生（▶）→ **Start server**。パネルに表示される送出レートを `--fs` に渡す。
 
 プラグインは**選択中の VFO を 0 Hz へ落として間引いてから**流すので、周波数を変えたいときは
 SDR# のスペクトラムをクリックするだけでよい（デコーダは再起動不要）。
@@ -58,26 +90,29 @@ IQ Exporter（Network Sink）を **TCP / Int16** で待ち受けにして、そ�
 
 ```sh
 # SDR#（cf32、プラグインのレートが 64000 の場合）
-./stdt86     live tcp://127.0.0.1:5555 --fs 64000 --fmt cf32
-./qpsknarrow live -fs 64000 -fmt cf32 tcp://127.0.0.1:5555
+./std-t86             live tcp://127.0.0.1:5555 --fs 64000 --fmt cf32
+./std-t115-qpsknarrow live -fs 64000 -fmt cf32 tcp://127.0.0.1:5555
 
 # SDR++（Int16）
-./stdt86     live tcp://127.0.0.1:5555 --fs 192000 --fmt cs16
-./qpsknarrow live -fs 192000 -fmt s16 tcp://127.0.0.1:5555
+./std-t86             live tcp://127.0.0.1:5555 --fs 192000 --fmt cs16
+./std-t115-qpsknarrow live -fs 192000 -fmt s16 tcp://127.0.0.1:5555
 
 # rtl_tcp（周波数はデコーダから指定する）
-./stdt86     live rtltcp://127.0.0.1:1234 --fs 1024000 --freq 60000000
-./qpsknarrow live -fs 1024000 -freq 60000000 rtltcp://127.0.0.1:1234
+./std-t86             live rtltcp://127.0.0.1:1234 --fs 1024000 --freq 60000000
+./std-t115-qpsknarrow live -fs 1024000 -freq 60000000 rtltcp://127.0.0.1:1234
 ```
 
-`qpsknarrow` は**オプションを入力より先に**書くこと（Go の flag は最初の非オプション引数で
+Windows は `std-t86.exe` / `std-t115-qpsknarrow.exe`（コマンドプロンプトか PowerShell から。
+エクスプローラでダブルクリックしても引数を渡せない）。
+
+`std-t115-qpsknarrow` は**オプションを入力より先に**書くこと（Go の flag は最初の非オプション引数で
 解析を止めるため）。
 
 録音ファイル（`.wav` は I=L / Q=R、`.cu8`、`.cf32`）も同じように再生できる。
 
 ```sh
-./stdt86     live recording.wav --offset 0
-./qpsknarrow live recording.wav
+./std-t86             live recording.wav --offset 0
+./std-t115-qpsknarrow live recording.wav
 ```
 
 ## 4. ブラウザで聴く
@@ -88,8 +123,8 @@ IQ Exporter（Network Sink）を **TCP / Int16** で待ち受けにして、そ�
 音声ペインの **「再生開始」ボタン**を押すと鳴りはじめる（ブラウザの自動再生制限があるので、
 最初の 1 回はクリックが要る）。通報が終わると WAV としてダウンロードもできる。
 
-両方を同時に動かすときは、どちらかの待ち受けをずらすこと（`stdt86 live … --port 8001` /
-`qpsknarrow live -addr 127.0.0.1:8001 …`）。
+両方を同時に動かすときは、どちらかの待ち受けをずらすこと（`std-t86 live … --port 8001` /
+`std-t115-qpsknarrow live -addr 127.0.0.1:8001 …`）。
 
 ## よく使うオプション
 
@@ -105,15 +140,36 @@ IQ Exporter（Network Sink）を **TCP / Int16** で待ち受けにして、そ�
 
 ## 音が出ないとき
 
-1. **音声デコーダをビルドしたか**（手順 1）。未ビルドだと画面のログに警告が出る。
+1. **`build/` フォルダを実行ファイルの隣に置いたままか**（手順 1）。STD-T115 は
+   `build/amrwbplus/` を自分でビルドして置く。未配置だと画面のログに警告が出る。
 2. **「再生開始」を押したか**。ブラウザは操作なしに音を鳴らせない。
 3. **同期しているか**。画面上部の CRC 一致率が 0 のままなら、`--fs` が SDR 側の送出レートと
    合っていないか、`--fmt` の形式が違うか、チャネルに同調できていない。
 4. **放送していない**。同報無線は常時送信ではないので、放送が無い時間帯は制御信号すら
    出ないことがある（STD-T115 は待機中は電波が出ない）。
 
+## ソースからビルドする
+
+配布していない OS / CPU で動かしたいときや、自分で改造するとき。Go と C コンパイラ、
+Python 3（標準ライブラリのみ）が要る。
+
+```sh
+# デコーダ本体
+go build -o std-t86             ./cmd/std-t86
+go build -o std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
+
+# 音声デコーダ（使うほうだけでよい）
+bash scripts/std-t86/build_g7221.sh        # STD-T86 用（G.722.1）
+bash scripts/std-t115/build_amrwbplus.sh   # STD-T115 用（AMR-WB+）
+```
+
+Windows は `pwsh scripts/std-t86/build_g7221.ps1` /
+`pwsh scripts/std-t115/build_amrwbplus.ps1`（MinGW-w64 の gcc/clang が要る。MSVC cl は非対応）。
+
+音声デコーダのビルドは必須ではないが、無いと**音が出ない**（制御チャネルの復号と画面表示は
+動く）。AMR-WB+ の参照ソースは再頒布できないため、スクリプトが取得・パッチ・ビルドまでを行う。
+
 ## 本プログラムの作成方法
 
 全てのコードは Claude Code により生成されている。また、インターネット上の公開情報と実電波のみを元に作成している。
 そのため、誤りが多数あると思われる。
-

@@ -347,7 +347,7 @@ export function init(store) {
       })).join("\n");
     }
     const stamp = fmtDateMS(Date.now()) + "_" + fmtClockMS(Date.now(), 0).replace(/:/g, "");
-    download(`stdt86_messages_${stamp}.${kind === "csv" ? "csv" : "jsonl"}`, text);
+    download(`t86_messages_${stamp}.${kind === "csv" ? "csv" : "jsonl"}`, text);
   }
 
   function download(name, text) {

@@ -1,8 +1,8 @@
 package decoder
 
 import (
-	"github.com/symysak/stdt86/internal/std-t86/control"
-	"github.com/symysak/stdt86/internal/std-t86/dsp"
+	"github.com/symysak/arib/internal/std-t86/control"
+	"github.com/symysak/arib/internal/std-t86/dsp"
 )
 
 const cfoAcquireSeconds = 0.5

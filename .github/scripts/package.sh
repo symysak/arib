@@ -4,6 +4,7 @@ set -euo pipefail
 GOOS="${1:?goos}"
 GOARCH="${2:?goarch}"
 BIN="${3:?本体バイナリのパス}"
+shift 3
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -14,7 +15,9 @@ else
     VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 fi
 
-NAME="stdt86-${VERSION}-${GOOS}-${GOARCH}"
+BASE="$(basename "$BIN")"
+BASE="${BASE%.exe}"
+NAME="${BASE}-${VERSION}-${GOOS}-${GOARCH}"
 PKG="pkg/$NAME"
 ITU_SRC="third_party/T-REC-G.722.1-200505-I!!SOFT-ZST-E/Software/Fixed-200505-Rel.2.1"
 
@@ -23,9 +26,14 @@ mkdir -p "$PKG"
 
 install -m 0755 "$BIN" "$PKG/$(basename "$BIN")"
 
-mkdir -p "$PKG/build"
-cp -R build/g7221 "$PKG/build/g7221"
-cp "$ITU_SRC/Readme.txt" "$PKG/build/g7221/ITU-G.722.1-Readme.txt"
+for dir in "$@"; do
+    [ -d "$dir" ] || { echo "同梱するディレクトリが無い: $dir" >&2; exit 1; }
+    mkdir -p "$PKG/$(dirname "$dir")"
+    cp -R "$dir" "$PKG/$dir"
+    if [ "$dir" = "build/g7221" ]; then
+        cp "$ITU_SRC/Readme.txt" "$PKG/build/g7221/ITU-G.722.1-Readme.txt"
+    fi
+done
 
 cp readme.md "$PKG/readme.md"
 

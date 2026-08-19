@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Goos,
     [Parameter(Mandatory = $true)][string]$Goarch,
     [Parameter(Mandatory = $true)][string]$Binary,
+    [string[]]$BuildDirs = @(),
     [string]$PluginDll
 )
 $ErrorActionPreference = 'Stop'
@@ -18,19 +19,27 @@ try {
         if (-not $Version) { $Version = 'dev' }
     }
 
-    $Name = "stdt86-$Version-$Goos-$Goarch"
+    $Base = [IO.Path]::GetFileNameWithoutExtension($Binary)
+    $Name = "$Base-$Version-$Goos-$Goarch"
     $Pkg = Join-Path 'pkg' $Name
     $ItuSrc = 'third_party\T-REC-G.722.1-200505-I!!SOFT-ZST-E\Software\Fixed-200505-Rel.2.1'
     $Zip = "$Name.zip"
 
     Remove-Item -Recurse -Force 'pkg', $Zip -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force (Join-Path $Pkg 'build') | Out-Null
+    New-Item -ItemType Directory -Force $Pkg | Out-Null
 
     Copy-Item -LiteralPath $Binary -Destination (Join-Path $Pkg (Split-Path -Leaf $Binary))
 
-    Copy-Item -Recurse -LiteralPath 'build\g7221' -Destination (Join-Path $Pkg 'build\g7221')
-    Copy-Item -LiteralPath (Join-Path $ItuSrc 'Readme.txt') `
-        -Destination (Join-Path $Pkg 'build\g7221\ITU-G.722.1-Readme.txt')
+    foreach ($dir in $BuildDirs) {
+        if (-not (Test-Path -LiteralPath $dir)) { throw "同梱するディレクトリが無い: $dir" }
+        $destParent = Join-Path $Pkg (Split-Path -Parent $dir)
+        New-Item -ItemType Directory -Force $destParent | Out-Null
+        Copy-Item -Recurse -LiteralPath $dir -Destination (Join-Path $Pkg $dir)
+        if ($dir -eq 'build\g7221') {
+            Copy-Item -LiteralPath (Join-Path $ItuSrc 'Readme.txt') `
+                -Destination (Join-Path $Pkg 'build\g7221\ITU-G.722.1-Readme.txt')
+        }
+    }
 
     Copy-Item -LiteralPath 'readme.md' -Destination (Join-Path $Pkg 'readme.md')
 

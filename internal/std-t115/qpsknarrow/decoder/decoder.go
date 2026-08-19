@@ -4,9 +4,9 @@ import (
 	"math"
 	"sort"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/control"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/dsp"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/fec"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/control"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/dsp"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/fec"
 )
 
 type FrameKind int

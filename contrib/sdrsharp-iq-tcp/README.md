@@ -58,7 +58,7 @@ dotnet build -c Release -p:RefsDir="C:\path\to\sdrplugins\lib"
 3. パネルに出ているコマンドをそのまま実行（`--fs` はパネルの Rate 表示と一致する値）:
 
    ```sh
-   stdt86 live tcp://127.0.0.1:5555 --offset 0 --fs 64000 --fmt cf32
+   std-t86 live tcp://127.0.0.1:5555 --offset 0 --fs 64000 --fmt cf32
    # 別ホストの SDR# なら 127.0.0.1 をそのマシンの IP に
    ```
 4. **あとは SDR# のスペクトラムで目的のチャネルをクリックするだけ**。VFO オフセットは

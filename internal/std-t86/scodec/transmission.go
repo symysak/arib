@@ -3,7 +3,7 @@ package scodec
 import (
 	"fmt"
 
-	"github.com/symysak/stdt86/internal/std-t86/fec"
+	"github.com/symysak/arib/internal/std-t86/fec"
 )
 
 const (

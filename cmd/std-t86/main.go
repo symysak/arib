@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/symysak/stdt86/internal/std-t86/fec"
-	"github.com/symysak/stdt86/internal/std-t86/g7221"
-	"github.com/symysak/stdt86/internal/std-t86/iq"
-	"github.com/symysak/stdt86/internal/std-t86/server"
+	"github.com/symysak/arib/internal/std-t86/fec"
+	"github.com/symysak/arib/internal/std-t86/g7221"
+	"github.com/symysak/arib/internal/std-t86/iq"
+	"github.com/symysak/arib/internal/std-t86/server"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func main() {
 func usage() {
 	fmt.Fprint(os.Stderr, `ARIB STD-T86 受信デコーダ
 
-  stdt86 live <source> [オプション]   ライブ受信 + Web モニタ
+  std-t86 live <source> [オプション]   ライブ受信 + Web モニタ
 
 <source>:
   録音ファイル (.wav / .cu8 / .cf32)      実時間ペースで再生（回帰確認用）
@@ -71,7 +71,7 @@ func cmdLive(argv []string) int {
 	host := fs.String("host", "127.0.0.1", "Web サーバの bind アドレス")
 	port := fs.Int("port", 8000, "Web サーバのポート")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "使い方: stdt86 live <source> [オプション]\n\n")
+		fmt.Fprintf(os.Stderr, "使い方: std-t86 live <source> [オプション]\n\n")
 		fs.PrintDefaults()
 	}
 	var positional []string

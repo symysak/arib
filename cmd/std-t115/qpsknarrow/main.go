@@ -8,11 +8,11 @@ import (
 	"os"
 	"sort"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/amrwbp"
-	dec "github.com/symysak/stdt86/internal/std-t115/qpsknarrow/decoder"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/dsp"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/iqsrc"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/municipality"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/amrwbp"
+	dec "github.com/symysak/arib/internal/std-t115/qpsknarrow/decoder"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/dsp"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/iqsrc"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/municipality"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 }
 
 func cmdDecode(argv []string) int {
-	fs := flag.NewFlagSet("qpsknarrow", flag.ExitOnError)
+	fs := flag.NewFlagSet("std-t115-qpsknarrow", flag.ExitOnError)
 	sampleRate := fs.Float64("fs", 0, "サンプルレート [Hz]（WAV なら省略可）")
 	offset := fs.Float64("offset", 0, "チャネルオフセット [kHz]")
 	startSec := fs.Float64("start", 0, "開始位置 [s]")
@@ -41,8 +41,8 @@ func cmdDecode(argv []string) int {
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `ARIB STD-T115 QPSK ナロー方式 受信デコーダ
 
-  qpsknarrow <file> [オプション]        制御チャネルを復号して一覧表示
-  qpsknarrow live <file> [オプション]   ライブ Web モニタ（http://127.0.0.1:8000/）
+  std-t115-qpsknarrow <file> [オプション]        制御チャネルを復号して一覧表示
+  std-t115-qpsknarrow live <file> [オプション]   ライブ Web モニタ（http://127.0.0.1:8000/）
 
 STD-T115 の 3 方式のうち QPSK ナロー方式（Volume 2, チャネル間隔 7.5kHz,
 11.25kbps, 80ms/900bit）専用。STD-T86 とも他 2 方式とも互換性は無い。

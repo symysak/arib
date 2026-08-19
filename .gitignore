@@ -1,8 +1,8 @@
 # Go
-/stdt86
-/stdt86.exe
-/qpsknarrow
-/qpsknarrow.exe
+/std-t86
+/std-t86.exe
+/std-t115-qpsknarrow
+/std-t115-qpsknarrow.exe
 *.test
 *.out
 

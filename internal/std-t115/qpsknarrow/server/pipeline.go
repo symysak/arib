@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/amrwbp"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/control"
-	dec "github.com/symysak/stdt86/internal/std-t115/qpsknarrow/decoder"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/dsp"
-	"github.com/symysak/stdt86/internal/std-t115/qpsknarrow/iqsrc"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/amrwbp"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/control"
+	dec "github.com/symysak/arib/internal/std-t115/qpsknarrow/decoder"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/dsp"
+	"github.com/symysak/arib/internal/std-t115/qpsknarrow/iqsrc"
 )
 
 type Config struct {
