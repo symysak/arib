@@ -129,6 +129,7 @@ type Decoder struct {
 	lastConstT float64
 
 	finder    *fec.ScrambleFinder
+	tchSolver *fec.TCHScrambleSolver
 	scramble  int
 	pinned    bool
 	scrConf   float64
@@ -308,6 +309,17 @@ func (d *Decoder) decodeAt(iq []complex64, startSample int64) []Frame {
 		}
 		d.tryLockScramble(symToSec(0))
 	}
+	if d.finder != nil {
+		for _, cd := range cands {
+			if cd.kind != KindSC || cd.start < 0 || cd.start+dsp.FrameSymbols > len(sym) {
+				continue
+			}
+			if d.solveScrambleFromSC(sym[cd.start:cd.start+dsp.FrameSymbols],
+				math.Atan2(imag(cd.c), real(cd.c)), symToSec(cd.start)) {
+				break
+			}
+		}
+	}
 
 	var out []Frame
 	for _, cd := range cands {
@@ -475,6 +487,7 @@ type ScrambleInfo struct {
 	Prominence float64
 	Frames int
 	TimeSec float64
+	Source string
 }
 
 func (d *Decoder) feedScramble(fr []complex128, phase float64) {
@@ -503,7 +516,7 @@ func (d *Decoder) tryLockScramble(tSec float64) {
 	if d.cfg.OnScramble != nil {
 		d.cfg.OnScramble(ScrambleInfo{
 			Init: r.Init, Confidence: r.Confidence, Prominence: r.Prominence,
-			Frames: r.Frames, TimeSec: tSec,
+			Frames: r.Frames, TimeSec: tSec, Source: "SB0",
 		})
 	}
 }
@@ -519,6 +532,45 @@ func cchRaw(g []complex128) (string, []float64) {
 	return sw, llr
 }
 
+func scRaw(g []complex128) (string, []float64) {
+	sw := dsp.BitsToHex(dsp.SymbolsToBits(g[symSW : symSW+symSWLen]))
+	llr := make([]float64, 0, fec.TCHCodedBits)
+	llr = append(llr, dsp.SymbolsToLLR(g[symSCFirst:symSW], 2)...)
+	llr = append(llr, dsp.SymbolsToLLR(g[symSCLast:], 2)...)
+	if len(llr) != fec.TCHCodedBits {
+		return sw, nil
+	}
+	return sw, llr
+}
+
+func (d *Decoder) solveScrambleFromSC(fr []complex128, phase, tSec float64) bool {
+	rot := complex(math.Cos(-phase), math.Sin(-phase))
+	g := make([]complex128, len(fr))
+	for i, v := range fr {
+		g[i] = v * rot
+	}
+	sw, llr := scRaw(g)
+	if llr == nil || hexBitErrors(sw, dsp.SW3Hex) > maxSWErrors {
+		return false
+	}
+	if d.tchSolver == nil {
+		d.tchSolver = fec.NewTCHScrambleSolver()
+	}
+	r, ok := d.tchSolver.Solve(fec.HardBits(llr))
+	if !ok || r.Confidence < scrambleMinConfidence {
+		return false
+	}
+	d.finder = nil
+	d.setScramble(r.Init, false, r.Confidence, 1)
+	if d.cfg.OnScramble != nil {
+		d.cfg.OnScramble(ScrambleInfo{
+			Init: r.Init, Confidence: r.Confidence,
+			Frames: 1, TimeSec: tSec, Source: "SC",
+		})
+	}
+	return true
+}
+
 func (d *Decoder) decodeSC(fr []complex128, phase float64) Frame {
 	f := Frame{Kind: KindSC, PhaseDeg: phase * 180 / math.Pi, AMRSN: -1}
 	rot := complex(math.Cos(-phase), math.Sin(-phase))
@@ -526,15 +578,9 @@ func (d *Decoder) decodeSC(fr []complex128, phase float64) Frame {
 	for i, s := range fr {
 		g[i] = s * rot
 	}
-	f.SW = dsp.BitsToHex(dsp.SymbolsToBits(g[symSW : symSW+symSWLen]))
-	if d.pn900 == nil {
-		return f
-	}
-
-	llr := make([]float64, 0, fec.TCHCodedBits)
-	llr = append(llr, dsp.SymbolsToLLR(g[symSCFirst:symSW], 2)...)
-	llr = append(llr, dsp.SymbolsToLLR(g[symSCLast:], 2)...)
-	if len(llr) != fec.TCHCodedBits {
+	sw, llr := scRaw(g)
+	f.SW = sw
+	if d.pn900 == nil || llr == nil {
 		return f
 	}
 	for i := range llr {

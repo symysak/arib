@@ -4,11 +4,10 @@ import "fmt"
 
 
 func MunicipalCodeToSeed(code int) (int, error) {
-	seed := code & 0x1FF
-	if seed == 0 {
-		return 0, fmt.Errorf("シードが 0 になりました（有効範囲 1..511）")
+	if code <= 0 {
+		return 0, fmt.Errorf("市区町村コードが不正です: %d", code)
 	}
-	return seed, nil
+	return code & 0x1FF, nil
 }
 
 func LFSRPN(seed, length int) []uint8 {

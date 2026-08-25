@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/std-t86/decoder"
 	"github.com/symysak/arib/internal/std-t86/g7221"
 	"github.com/symysak/arib/internal/std-t86/scodec"
 	"github.com/symysak/arib/internal/std-t86/wavio"
@@ -262,7 +263,7 @@ func (w *audioWorker) decodeBatch(wid int, wa *windowAudio) {
 
 	note := ""
 	seed := w.currentSeed()
-	if seed == 0 {
+	if seed == decoder.SeedAuto {
 		note = "スクランブル値が未確定のため音声デコードを保留しました"
 	} else if err := w.decodeAndAppend(wid, wa, entries, seed); err != nil {
 		note = fmt.Sprintf("デコード失敗: %v", err)

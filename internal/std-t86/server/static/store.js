@@ -8,6 +8,7 @@ const LOG_CAP = 50000;
 const QUALITY_CAP = 10800;
 const SEED_HISTORY_CAP = 8;
 const SEED_PIN_HOLD_MS = 2000;
+export const SEED_AUTO = -1;
 
 function initialState() {
   return {
@@ -93,7 +94,7 @@ function createStore() {
   }
 
   function recordSeed(ev) {
-    if (typeof ev.seed !== "number" || ev.seed <= 0) return;
+    if (typeof ev.seed !== "number" || ev.seed < 0) return;
     const e = state.seedHistory.find(x => x.seed === ev.seed);
     if (e) {
       e.count++;
@@ -363,8 +364,8 @@ function createStore() {
   }
 
   async function pinSeed(seed) {
-    const v = typeof seed === "number" && seed > 0 ? seed : 0;
-    state.pinnedSeed = v > 0 ? v : null;
+    const v = typeof seed === "number" && seed >= 0 && seed < 512 ? seed : SEED_AUTO;
+    state.pinnedSeed = v === SEED_AUTO ? null : v;
     pinHoldUntil = Date.now() + SEED_PIN_HOLD_MS;
     touch("seed");
     try {
@@ -374,7 +375,7 @@ function createStore() {
     } catch {
     }
     addMarker(state.t, "seed",
-      v > 0 ? `スクランブル値 ${v} を手動固定` : "スクランブル値を自動判定へ戻す");
+      v === SEED_AUTO ? "スクランブル値を自動判定へ戻す" : `スクランブル値 ${v} を手動固定`);
     touch("seed");
   }
 

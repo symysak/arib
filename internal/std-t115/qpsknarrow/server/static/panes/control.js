@@ -9,8 +9,9 @@ export function init(store) {
     if (!sc || !sc.locked) return '<span class="pill">判定中…</span>';
     const hex = `0x${sc.init.toString(16).toUpperCase().padStart(4, '0')}`;
     if (sc.pinned) return `${hex} <span class="pill">固定</span>`;
+    const src = sc.source || 'SB0';
     return `${hex} <span class="pill ok">自動</span>`
-      + ` <span class="muted tiny">信頼度 ${sc.confidence.toFixed(3)} / SB0 ${sc.frames} 枚</span>`;
+      + ` <span class="muted tiny">信頼度 ${sc.confidence.toFixed(3)} / ${src} ${sc.frames} 枚</span>`;
   };
 
   const municipalityCell = (sc) => {

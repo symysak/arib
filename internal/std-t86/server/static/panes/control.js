@@ -2,6 +2,7 @@
 "use strict";
 
 import { fmtClock } from "../time.js";
+import { SEED_AUTO } from "../store.js";
 
 const BCCH_TYPES = new Set([0x10, 0x20, 0x21, 0x40]);
 const NOTIFY_TYPE = 0x63;
@@ -245,13 +246,14 @@ function seedPanelHTML(state) {
   const pinned = state.pinnedSeed;
   const active = state.control ? state.control.seed : null;
 
+  const hasPin = pinned !== null && pinned !== undefined;
   let h = '<div class="seedpin">';
   h += '<span class="title">スクランブル値の直近判定</span>';
-  h += pinned
+  h += hasPin
     ? `<span class="badge ok">固定中 ${esc(pinned)}</span>`
     : '<span class="badge idle">自動判定</span>';
-  h += `<button class="btn plain" data-seed-pin="0"${pinned ? "" : " disabled"}>`
-    + "自動に戻す</button></div>";
+  h += `<button class="btn plain" data-seed-pin="${SEED_AUTO}"`
+    + `${hasPin ? "" : " disabled"}>自動に戻す</button></div>`;
 
   if (!hist.length) {
     return h + '<div class="note">まだ自動判定の確定がありません。'
@@ -262,14 +264,14 @@ function seedPanelHTML(state) {
     + "<th>最終判定</th><th></th></tr></thead><tbody>";
   for (const e of hist) {
     const names = (e.candidates || []).map(c => c[1]).join("、") || "—";
-    const isPinned = pinned === e.seed;
+    const rowPinned = pinned === e.seed;
     h += `<tr class="${e.seed === active ? "confirmed" : ""}">`
       + `<td class="code">${esc(e.seed)}</td>`
       + `<td class="code">${esc(e.count)}</td>`
       + `<td class="name">${esc(names)}</td>`
       + `<td class="code">${esc(fmtClock(e.lastT, 0))}</td>`
-      + `<td><button class="btn plain${isPinned ? " on" : ""}" `
-      + `data-seed-pin="${esc(e.seed)}">${isPinned ? "固定中" : "固定"}</button></td>`
+      + `<td><button class="btn plain${rowPinned ? " on" : ""}" `
+      + `data-seed-pin="${esc(e.seed)}">${rowPinned ? "固定中" : "固定"}</button></td>`
       + "</tr>";
   }
   return h + "</tbody></table>";

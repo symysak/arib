@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/symysak/arib/internal/std-t86/decoder"
 	"github.com/symysak/arib/internal/std-t86/fec"
 	"github.com/symysak/arib/internal/std-t86/g7221"
 	"github.com/symysak/arib/internal/std-t86/iq"
@@ -54,8 +55,8 @@ func cmdLive(argv []string) int {
 	fs := flag.NewFlagSet("live", flag.ExitOnError)
 	municipalCode := fs.Int("municipal-code", 0,
 		"市区町村コード（例 40225）。指定するとスクランブル値を固定する")
-	seedFlag := fs.Int("seed", 0,
-		"スクランブル値を直接指定（1..511）。--municipal-code より優先")
+	seedFlag := fs.Int("seed", decoder.SeedAuto,
+		"スクランブル値を直接指定（0..511。-1 で自動判定）。--municipal-code より優先")
 	offsetKHz := fs.Float64("offset", 0,
 		"チャネルオフセット [kHz]（省略で 0 = 同調済みの前提）")
 	sampleRate := fs.Float64("fs", 0,
@@ -92,17 +93,22 @@ func cmdLive(argv []string) int {
 	}
 	source := positional[0]
 
-	seed := 0
+	var seedFixed *int
 	switch {
-	case *seedFlag != 0:
-		seed = *seedFlag
+	case *seedFlag >= 0:
+		if *seedFlag >= fec.NSeeds {
+			fmt.Fprintf(os.Stderr, "--seed は 0..%d です\n", fec.NSeeds-1)
+			return 2
+		}
+		v := *seedFlag
+		seedFixed = &v
 	case *municipalCode != 0:
 		s, err := fec.MunicipalCodeToSeed(*municipalCode)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
-		seed = s
+		seedFixed = &s
 	default:
 		fmt.Println("スクランブル値: 自動判定モード（制御スロット蓄積後に確定します）")
 	}
@@ -131,8 +137,8 @@ func cmdLive(argv []string) int {
 	}
 
 	seedDesc := "自動"
-	if seed != 0 {
-		seedDesc = fmt.Sprint(seed)
+	if seedFixed != nil {
+		seedDesc = fmt.Sprint(*seedFixed)
 	}
 	offDesc := "0(未指定)"
 	if offsetGiven {
@@ -140,7 +146,7 @@ func cmdLive(argv []string) int {
 	}
 	cfg := server.Config{
 		F0Hz:          *offsetKHz * 1e3,
-		Seed:          seed,
+		SeedFixed:     seedFixed,
 		MunicipalCode: *municipalCode,
 		SyncThresh:    *syncThresh,
 		LogDir:        *logDir,

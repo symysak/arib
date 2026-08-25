@@ -101,6 +101,7 @@ type ScrambleInfo struct {
 	Confidence float64 `json:"confidence"`
 	Prominence float64 `json:"prominence"`
 	Frames int `json:"frames"`
+	Source string `json:"source"`
 	TSec float64 `json:"t_sec"`
 
 	MunicipalCode     int    `json:"municipal_code"`

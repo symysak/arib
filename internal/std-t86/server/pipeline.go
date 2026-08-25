@@ -12,6 +12,7 @@ import (
 	"github.com/symysak/arib/internal/std-t86/citycodes"
 	"github.com/symysak/arib/internal/std-t86/control"
 	"github.com/symysak/arib/internal/std-t86/decoder"
+	"github.com/symysak/arib/internal/std-t86/fec"
 	"github.com/symysak/arib/internal/std-t86/iq"
 )
 
@@ -33,14 +34,16 @@ type PCMFrame struct {
 }
 
 type Config struct {
-	F0Hz          float64
-	Seed          int
+	F0Hz float64
+	SeedFixed     *int
 	MunicipalCode int
 	SyncThresh    float64
 	LogDir        string
 	SourceDesc    string
 	SourcePath string
 }
+
+func SeedPtr(v int) *int { return &v }
 
 type Pipeline struct {
 	source  iq.Source
@@ -68,16 +71,19 @@ type Pipeline struct {
 	chunk int
 }
 
-const seedPinAuto = -1
+const seedPinNone = -2
 
 func (p *Pipeline) fixedSeed() int {
 	switch v := p.seedPin.Load(); {
-	case v > 0:
-		return int(v)
-	case v == seedPinAuto:
-		return 0
+	case v == seedPinNone:
+		if p.cfg.SeedFixed != nil {
+			return *p.cfg.SeedFixed
+		}
+		return decoder.SeedAuto
+	case v == decoder.SeedAuto:
+		return decoder.SeedAuto
 	default:
-		return p.cfg.Seed
+		return int(v)
 	}
 }
 
@@ -85,7 +91,11 @@ func NewPipeline(source iq.Source, cfg Config) *Pipeline {
 	if cfg.SyncThresh <= 0 {
 		cfg.SyncThresh = 0.6
 	}
-	st := newLiveState(cfg.Seed, cfg.MunicipalCode)
+	cfgSeed := decoder.SeedAuto
+	if cfg.SeedFixed != nil {
+		cfgSeed = *cfg.SeedFixed
+	}
+	st := newLiveState(cfgSeed, cfg.MunicipalCode)
 	st.f0Hz, st.hasF0 = cfg.F0Hz, true
 	if c, ok := source.CenterHz(); ok {
 		st.centerHz, st.hasCenter = c, true
@@ -99,7 +109,7 @@ func NewPipeline(source iq.Source, cfg Config) *Pipeline {
 
 	p := &Pipeline{
 		source:   source,
-		decoder:  decoder.NewStreamingDecoder(source.SampleRate(), cfg.F0Hz, cfg.Seed, cfg.SyncThresh),
+		decoder:  decoder.NewStreamingDecoder(source.SampleRate(), cfg.F0Hz, cfgSeed, cfg.SyncThresh),
 		state:    st,
 		cfg:      cfg,
 		eventCh:  make(chan Event, eventBuffer),
@@ -108,11 +118,13 @@ func NewPipeline(source iq.Source, cfg Config) *Pipeline {
 		stop:     make(chan struct{}),
 		finished: make(chan struct{}),
 	}
+	p.seedPin.Store(seedPinNone)
+	p.seedPinReq.Store(seedPinNone)
 	p.chunk = int(source.SampleRate() * chunkSeconds)
 	if p.chunk < 1 {
 		p.chunk = 1
 	}
-	p.audio = newAudioWorker(cfg.Seed, st, p.emit,
+	p.audio = newAudioWorker(cfgSeed, st, p.emit,
 		func(wid int, pcm []int16) { p.sendPCM(PCMFrame{wid, pcm}) }, cfg.LogDir)
 	if cfg.LogDir != "" {
 		p.iqrec = newIQRecorder(source.SampleRate(), cfg.F0Hz, cfg.LogDir,
@@ -205,8 +217,8 @@ func (p *Pipeline) SetBroadcastStrict(strict bool) bool {
 func (p *Pipeline) RequestCFOReset() { p.cfoResetReq.Store(true) }
 
 func (p *Pipeline) RequestSeedPin(seed int) {
-	if seed <= 0 {
-		seed = seedPinAuto
+	if seed < 0 || seed >= fec.NSeeds {
+		seed = decoder.SeedAuto
 	}
 	p.seedPinReq.Store(int32(seed))
 }
@@ -323,7 +335,7 @@ func (p *Pipeline) dspLoop() {
 			p.emit(newLogEvent(tIn, "CFO を手動で再捕捉しました"))
 		}
 
-		if req := p.seedPinReq.Swap(0); req != 0 {
+		if req := p.seedPinReq.Swap(seedPinNone); req != seedPinNone {
 			p.applySeedPin(int(req), tIn, &msgTimes, tchBucket)
 			armed, hadValid = false, false
 			lastControlIn = inCount
@@ -356,7 +368,8 @@ func (p *Pipeline) dspLoop() {
 			lastValidIn = inCount
 			hadValid = true
 		}
-		wrongSeed := p.fixedSeed() == 0 && p.decoder.Seed != 0 && len(res.Control) > 0
+		wrongSeed := p.fixedSeed() == decoder.SeedAuto &&
+			p.decoder.Seed != decoder.SeedAuto && len(res.Control) > 0
 		if (hadValid || wrongSeed) && !armed {
 			armed = true
 			if !valid {
@@ -441,12 +454,12 @@ func (p *Pipeline) resetOnSignalLoss(tIn float64) {
 	p.state.municipalityCode = 0
 	p.state.mu.Unlock()
 	p.decoder.ReacquireCFO()
-	if p.fixedSeed() == 0 {
+	if p.fixedSeed() == decoder.SeedAuto {
 		p.decoder.ResetSeed()
 		p.state.mu.Lock()
-		p.state.seed = 0
+		p.state.seed = decoder.SeedAuto
 		p.state.mu.Unlock()
-		p.audio.setSeed(0)
+		p.audio.setSeed(decoder.SeedAuto)
 	}
 	p.emit(newLogEvent(tIn,
 		"信号喪失: 制御チャネル状態をリセットしました"+
@@ -588,15 +601,12 @@ func (p *Pipeline) handleResult(res decoder.FeedResult, msgTimes *[]float64,
 func (p *Pipeline) applySeedPin(req int, tIn float64, msgTimes *[]float64,
 	tchBucket map[string]int) {
 	seed := req
-	if seed == seedPinAuto {
-		seed = 0
-	}
 	p.seedPin.Store(int32(req))
 
 	p.state.mu.Lock()
 	prev := p.state.seed
 	p.state.mu.Unlock()
-	if seed != prev && prev != 0 {
+	if seed != prev && prev != decoder.SeedAuto {
 		if w := p.decoder.ResetBroadcast(); w != nil {
 			p.emit(newLogEvent(tIn, fmt.Sprintf(
 				"スクランブル値を手動で変更したので通報 #%d を打ち切ります", w.WindowID)))
@@ -608,15 +618,15 @@ func (p *Pipeline) applySeedPin(req int, tIn float64, msgTimes *[]float64,
 
 	p.state.mu.Lock()
 	p.state.seed = seed
-	p.state.seedPinned = seed != 0
-	if seed != 0 {
+	p.state.seedPinned = seed != decoder.SeedAuto
+	if seed != decoder.SeedAuto {
 		p.state.lastSeed = seed
 	}
 	p.state.municipalityCode = 0
 	p.state.mu.Unlock()
 	p.audio.setSeed(seed)
 
-	if seed == 0 {
+	if seed == decoder.SeedAuto {
 		p.emit(newLogEvent(tIn,
 			"スクランブル値の手動固定を解除しました（自動判定に戻します）"))
 		return
@@ -646,7 +656,7 @@ func (p *Pipeline) onSeedDetected(info *decoder.SeedInfo) {
 	p.state.mu.Unlock()
 	p.audio.setSeed(info.Seed)
 
-	if prev != 0 && prev != info.Seed {
+	if prev != decoder.SeedAuto && prev != info.Seed {
 		if w := p.decoder.ResetBroadcast(); w != nil {
 			p.emit(newLogEvent(t, fmt.Sprintf(
 				"スクランブル値が %d → %d に変わったので通報 #%d を打ち切ります"+
@@ -722,7 +732,7 @@ func joinStrings(v []string, sep string) string {
 
 func messageFields(m control.Message) map[string]any {
 	f := map[string]any{}
-	if m.Seed != 0 {
+	if m.Seed >= 0 {
 		f["市区町村コード"] = m.Seed
 	}
 	if h := m.Header; h != nil {

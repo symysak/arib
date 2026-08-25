@@ -118,8 +118,8 @@ func run(path string, o runOpts) int {
 		OnScramble: func(si dec.ScrambleInfo) {
 			scrInfo = si
 			if !o.quiet {
-				fmt.Printf("スクランブル値を自動判定: 0x%04X（信頼度 %.3f, SB0 %d 枚, t=%.2fs）→ %s\n\n",
-					si.Init, si.Confidence, si.Frames, si.TimeSec,
+				fmt.Printf("スクランブル値を自動判定: 0x%04X（信頼度 %.3f, %s %d 枚, t=%.2fs）→ %s\n\n",
+					si.Init, si.Confidence, si.Source, si.Frames, si.TimeSec,
 					municipality.FromScramble(si.Init).Label())
 			}
 		},
@@ -237,10 +237,10 @@ func run(path string, o runOpts) int {
 	case o.scramble != 0:
 		fmt.Printf("スクランブル値: 0x%04X（固定）\n", o.scramble)
 	case scrInfo.Init != 0:
-		fmt.Printf("スクランブル値: 0x%04X（自動判定 信頼度 %.3f / SB0 %d 枚）\n",
-			scrInfo.Init, scrInfo.Confidence, scrInfo.Frames)
+		fmt.Printf("スクランブル値: 0x%04X（自動判定 信頼度 %.3f / %s %d 枚）\n",
+			scrInfo.Init, scrInfo.Confidence, scrInfo.Source, scrInfo.Frames)
 	default:
-		fmt.Printf("スクランブル値: 判定できず（SB0 が取れていない）\n")
+		fmt.Printf("スクランブル値: 判定できず（バーストが取れていない）\n")
 	}
 	if scr := max(o.scramble, scrInfo.Init); scr != 0 {
 		fmt.Printf("市区町村: %s\n", municipality.FromScramble(scr).Label())

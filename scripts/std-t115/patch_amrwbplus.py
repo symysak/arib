@@ -58,6 +58,21 @@ def fix_includes(root: pathlib.Path) -> int:
     return changed
 
 
+DHF_RE = re.compile(r'^(const\s+Word16\s*\*\s*dhf\s*\[\s*10\s*\]\s*;)$', re.M)
+
+
+def fix_common_symbols(root: pathlib.Path) -> bool:
+    path = root / "lib_amr" / "enc_if.c"
+    if not path.is_file():
+        return False
+    text = path.read_text(encoding="utf-8", errors="surrogateescape")
+    new = DHF_RE.sub(r"extern \1", text)
+    if new == text:
+        return False
+    path.write_text(new, encoding="utf-8", errors="surrogateescape")
+    return True
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         sys.stderr.write(__doc__)
@@ -69,6 +84,11 @@ def main() -> int:
 
     n = fix_includes(root)
     print("  include のパス区切りを直したファイル: %d" % n)
+
+    if fix_common_symbols(root):
+        print("  enc_if.c の dhf 仮定義を extern 宣言に直した")
+    else:
+        print("  enc_if.c の dhf は宣言済み")
 
     stub = root / "stub3gp.c"
     if not stub.exists() or stub.read_text(encoding="utf-8") != STUB:

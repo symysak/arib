@@ -3,6 +3,7 @@ package decoder
 import (
 	"github.com/symysak/arib/internal/std-t86/control"
 	"github.com/symysak/arib/internal/std-t86/dsp"
+	"github.com/symysak/arib/internal/std-t86/fec"
 )
 
 const cfoAcquireSeconds = 0.5
@@ -45,6 +46,8 @@ type FeedResult struct {
 	SeedDetected *SeedInfo
 }
 
+const SeedAuto = -1
+
 type StreamingDecoder struct {
 	FS   float64
 	F0   float64
@@ -60,6 +63,9 @@ type StreamingDecoder struct {
 }
 
 func NewStreamingDecoder(fs, f0 float64, seed int, syncThresh float64) *StreamingDecoder {
+	if seed < 0 || seed >= fec.NSeeds {
+		seed = SeedAuto
+	}
 	return &StreamingDecoder{
 		FS:        fs,
 		F0:        f0,
@@ -95,13 +101,13 @@ func (d *StreamingDecoder) ResetBroadcast() *BroadcastWindow {
 func (d *StreamingDecoder) ArmMidJoin() { d.broadcast.ArmMidJoin() }
 
 func (d *StreamingDecoder) ResetSeed() {
-	d.Seed = 0
+	d.Seed = SeedAuto
 	d.seeder.reset()
 }
 
 func (d *StreamingDecoder) PinSeed(seed int) FeedResult {
 	res := FeedResult{SWCounts: map[string]int{}}
-	if seed <= 0 {
+	if seed < 0 || seed >= fec.NSeeds {
 		d.ResetSeed()
 		return res
 	}
@@ -153,7 +159,7 @@ func (d *StreamingDecoder) handleBursts(bursts []dsp.DetectedBurst, res *FeedRes
 				continue
 			}
 			qual := BurstQuality{SW: b.SW, Corr: b.Corr, EVM: b.EVM, PowerDB: b.PowerDB}
-			if d.Seed == 0 {
+			if d.Seed == SeedAuto {
 				if info := d.seeder.push(b.Pos, bits, qual); info != nil {
 					d.applyDetectedSeed(info, res)
 				}
@@ -167,7 +173,7 @@ func (d *StreamingDecoder) handleBursts(bursts []dsp.DetectedBurst, res *FeedRes
 		if burst == nil {
 			continue
 		}
-		if burst.CType == "FACCH" && burst.CDist == 0 && d.Seed != 0 {
+		if burst.CType == "FACCH" && burst.CDist == 0 && d.Seed != SeedAuto {
 			msg, err := control.DecodeFACCH(burst.Bits, d.Seed)
 			if err == nil && (msg.CRCOK || control.KnownType(msg.Type)) {
 				res.Control = append(res.Control, PositionedMessage{b.Pos, msg,
@@ -183,7 +189,7 @@ func (d *StreamingDecoder) handleBursts(bursts []dsp.DetectedBurst, res *FeedRes
 const pendingVoiceCap = 1000
 
 func (d *StreamingDecoder) emitVoice(decided []DecidedBurst, res *FeedResult) {
-	if d.Seed == 0 {
+	if d.Seed == SeedAuto {
 		d.pendingVoice = append(d.pendingVoice, decided...)
 		if over := len(d.pendingVoice) - pendingVoiceCap; over > 0 {
 			d.appendVoice(d.pendingVoice[:over], res)
@@ -235,12 +241,12 @@ func (d *StreamingDecoder) Feed(chunk []complex64) FeedResult {
 	if len(mf) == 0 {
 		return res
 	}
-	if d.Seed == 0 {
+	if d.Seed == SeedAuto {
 		d.seeder.beginFeed()
 	}
 	d.handleBursts(d.tracker.Process(mf), &res)
 	d.emitVoice(d.smoother.release(d.tracker.FinalizedPos()), &res)
-	if d.Seed != 0 {
+	if d.Seed != SeedAuto {
 		d.flushPendingVoice(&res)
 	}
 	d.releaseEnded(&res)

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/symysak/arib/internal/std-t86/decoder"
 	"github.com/symysak/arib/internal/std-t86/fec"
 	"github.com/symysak/arib/internal/std-t86/wavio"
 )
@@ -193,18 +194,24 @@ func (s *Server) routes() {
 	})
 
 	s.mux.HandleFunc("POST /api/seed", func(w http.ResponseWriter, r *http.Request) {
-		v, err := intParam(r, "value")
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
+		raw := r.URL.Query().Get("value")
+		v := decoder.SeedAuto
+		if raw != "auto" {
+			n, err := intParam(r, "value")
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			v = n
 		}
-		if v < 0 || v >= fec.NSeeds {
+		if v < decoder.SeedAuto || v >= fec.NSeeds {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "value は 0（自動）または 1..511 です"})
+				"error": "value は -1/auto（自動判定）または 0..511 です"})
 			return
 		}
 		s.pipeline.RequestSeedPin(v)
-		writeJSON(w, http.StatusOK, map[string]any{"seed": v, "seed_pinned": v > 0})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"seed": v, "seed_pinned": v != decoder.SeedAuto})
 	})
 
 	s.mux.HandleFunc("GET /api/audio/{id}", func(w http.ResponseWriter, r *http.Request) {

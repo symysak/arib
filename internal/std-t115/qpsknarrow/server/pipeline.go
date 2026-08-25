@@ -233,6 +233,7 @@ func (p *Pipeline) Run() error {
 			info := ScrambleInfo{
 				Init: si.Init, Locked: true, Prominence: si.Prominence,
 				Confidence: si.Confidence, Frames: si.Frames, TSec: si.TimeSec,
+				Source: si.Source,
 			}
 			info.SetMunicipality()
 			p.mu.Lock()
@@ -240,8 +241,8 @@ func (p *Pipeline) Run() error {
 			p.snap.ScrambleInit = si.Init
 			p.mu.Unlock()
 			p.logf(si.TimeSec, "info",
-				"スクランブル値を自動判定しました: 0x%04X（信頼度 %.3f, SB0 %d 枚）→ 市区町村 %s",
-				si.Init, si.Confidence, si.Frames, info.MunicipalityLabel)
+				"スクランブル値を自動判定しました: 0x%04X（信頼度 %.3f, %s %d 枚）→ 市区町村 %s",
+				si.Init, si.Confidence, si.Source, si.Frames, info.MunicipalityLabel)
 			p.hub.broadcastJSON(ev(EvScramble, info))
 		},
 		OnBlock: func(b dec.BlockStats) {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/symysak/arib/internal/std-t86/citycodes"
 	"github.com/symysak/arib/internal/std-t86/control"
+	"github.com/symysak/arib/internal/std-t86/decoder"
 )
 
 
@@ -328,7 +329,7 @@ func (s *liveState) controlSummary() *controlSummary {
 	muniCode := s.municipalCode
 	s.mu.Unlock()
 
-	if seed == 0 {
+	if seed == decoder.SeedAuto {
 		return &controlSummary{
 			Searching: true, Candidates: []candidate{},
 			TypeCounts: orderedCounts{}, Manufacturers: orderedCounts{},
@@ -421,7 +422,7 @@ func (s *liveState) snapshot() snapshot {
 		v := s.centerHz
 		tuning.CenterHz = &v
 	}
-	if s.seed != 0 {
+	if s.seed != decoder.SeedAuto {
 		v := s.seed
 		tuning.Seed = &v
 	}
