@@ -173,3 +173,12 @@ Windows は `pwsh scripts/std-t86/build_g7221.ps1` /
 
 全てのコードは Claude Code により生成されている。また、インターネット上の公開情報と実電波のみを元に作成している。
 そのため、誤りが多数あると思われる。
+
+## 参考文献
+- 市町村デジタル同報通信システムの規格等に関する調査検討報告書  
+https://warp.ndl.go.jp/web/20090113093911/http://www.soumu.go.jp/s-news/2003/pdf/030425_2_03.pdf
+- DIGITAL SIMULTANEOUS
+COMMUNICATION SYSTEMS
+FOR MUNICIPALITIES GOVERNMENT
+TYPE2  
+https://www.arib.or.jp/english/html/overview/doc/5-STD-T115v2_7-E1.pdf
