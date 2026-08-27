@@ -21,6 +21,7 @@ import (
 )
 
 
+//go:embed all:static
 var staticFS embed.FS
 
 type hub struct {

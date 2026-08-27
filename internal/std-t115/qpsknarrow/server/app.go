@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 )
 
+//go:embed all:static
 var staticFS embed.FS
 
 type hub struct {

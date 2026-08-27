@@ -8,8 +8,10 @@ import (
 	"strings"
 )
 
+//go:embed current.tsv
 var currentTSV string
 
+//go:embed abolished.tsv
 var abolishedTSV string
 
 type Abolished struct {
