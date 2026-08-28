@@ -323,7 +323,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'リンクに失敗しました' }
 
     Write-Step "完成: $exe"
-    & $exe 2>&1 | Select-Object -First 3 | ForEach-Object { Write-Note $_ }
+    $eap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $exe 2>&1 |
+            ForEach-Object {
+                if ($_ -is [Management.Automation.ErrorRecord]) { $_.Exception.Message }
+                else { [string]$_ }
+            } |
+            Where-Object { $_ -and $_.Trim() -ne '' } |
+            Select-Object -First 3 |
+            ForEach-Object { Write-Note $_ }
+    } catch {
+    } finally {
+        $ErrorActionPreference = $eap
+        $global:LASTEXITCODE = 0
+    }
     Write-Host ''
     Write-Host "std-t115-qpsknarrow.exe を $root に置いてあれば、このまま音声が鳴ります。" -ForegroundColor Green
     Write-Host "別の場所で使うなら build\amrwbplus\ を実行ファイルの隣へコピーしてください。"

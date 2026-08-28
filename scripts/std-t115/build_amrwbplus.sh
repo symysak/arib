@@ -42,11 +42,12 @@ fi
 echo "==> パッチ"
 
 fixed=0
-for f in $(grep -rl '#include[[:space:]]*"[^"]*\\' "$SRC" --include='*.c' --include='*.h' || true); do
+while IFS= read -r -d '' f; do
+  grep -q '#include[[:space:]]*"[^"]*\\' "$f" || continue
   sed -e ':a' -e 's|^\([[:space:]]*#[[:space:]]*include[[:space:]]*"[^"]*\)\\|\1/|' -e 'ta' \
       "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   fixed=$((fixed + 1))
-done
+done < <(find "$SRC" -type f \( -name '*.c' -o -name '*.h' \) -print0)
 echo "  include のパス区切りを直したファイル: $fixed"
 
 ENC_IF="$SRC/lib_amr/enc_if.c"
@@ -112,16 +113,16 @@ CFLAGS="${CFLAGS:--O2 -w}"
 OBJ="$WORK/obj"
 rm -rf "$OBJ"; mkdir -p "$OBJ"
 
-SOURCES=""
+SOURCES=()
 for f in "$SRC"/common/*.c "$SRC"/decoder/*.c "$SRC"/lib_amr/*.c; do
   case "$(basename "$f")" in
     3gpp_mod.c) continue ;;
   esac
-  SOURCES="$SOURCES $f"
+  SOURCES+=("$f")
 done
-SOURCES="$SOURCES $SRC/stub3gp.c"
+SOURCES+=("$SRC/stub3gp.c")
 
-(cd "$OBJ" && $CC $CFLAGS -c $SOURCES -I "$SRC/include" -I "$SRC/lib_amr")
+(cd "$OBJ" && $CC $CFLAGS -c "${SOURCES[@]}" -I "$SRC/include" -I "$SRC/lib_amr")
 $CC $CFLAGS "$OBJ"/*.o -lm -o "$WORK/amrwbp_decoder"
 
 echo "==> 完成: $WORK/amrwbp_decoder"
