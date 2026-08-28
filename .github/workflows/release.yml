@@ -84,7 +84,10 @@ jobs:
       - name: zip を作る
         run: |
           bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t86 build/g7221
-          bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t115-qpsknarrow
+          # AMR-WB+ 本体の代わりにビルドスクリプトを同梱する（3GPP の配布物は再頒布不可）。
+          # zip を展開したフォルダで実行すれば build/amrwbplus/ が実行ファイルの隣に出来る。
+          bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t115-qpsknarrow \
+            scripts/std-t115/build_amrwbplus.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -145,7 +148,8 @@ jobs:
       - name: zip を作る
         run: |
           bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t86 build/g7221
-          bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t115-qpsknarrow
+          bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t115-qpsknarrow \
+            scripts/std-t115/build_amrwbplus.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -229,7 +233,10 @@ jobs:
           .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t86.exe `
             -BuildDirs build\g7221 `
             -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
+          # build_amrwbplus.ps1 は gcc が無ければ WinLibs を winget（無ければ直接
+          # ダウンロード）で入れるところまでやるので、同梱するのはこの 1 本でよい。
           .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t115-qpsknarrow.exe `
+            -ExtraFiles scripts\std-t115\build_amrwbplus.ps1 `
             -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
 
       - uses: actions/upload-artifact@v7

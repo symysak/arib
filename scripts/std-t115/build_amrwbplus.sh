@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [ "$(basename "$SCRIPT_DIR")" = "std-t115" ] &&
+   [ "$(basename "$(dirname "$SCRIPT_DIR")")" = "scripts" ]; then
+  ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+else
+  ROOT="$SCRIPT_DIR"
+fi
+ROOT="${AMRWBPLUS_OUT_DIR:-$ROOT}"
+
 WORK="$ROOT/build/amrwbplus"
 SRC="$WORK/src"
 ZIP="$WORK/26304-c00.zip"
@@ -31,7 +40,71 @@ if [ ! -d "$SRC" ]; then
 fi
 
 echo "==> パッチ"
-python3 "$ROOT/scripts/std-t115/patch_amrwbplus.py" "$SRC"
+
+fixed=0
+for f in $(grep -rl '#include[[:space:]]*"[^"]*\\' "$SRC" --include='*.c' --include='*.h' || true); do
+  sed -e ':a' -e 's|^\([[:space:]]*#[[:space:]]*include[[:space:]]*"[^"]*\)\\|\1/|' -e 'ta' \
+      "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  fixed=$((fixed + 1))
+done
+echo "  include のパス区切りを直したファイル: $fixed"
+
+ENC_IF="$SRC/lib_amr/enc_if.c"
+if [ -f "$ENC_IF" ] &&
+   grep -qE '^const[[:space:]]+Word16[[:space:]]*\*[[:space:]]*dhf[[:space:]]*\[[[:space:]]*10[[:space:]]*\][[:space:]]*;[[:space:]]*$' "$ENC_IF"; then
+  sed -e 's|^\(const[[:space:]][[:space:]]*Word16[[:space:]]*\*[[:space:]]*dhf[[:space:]]*\[[[:space:]]*10[[:space:]]*\][[:space:]]*;[[:space:]]*\)$|extern \1|' \
+      "$ENC_IF" > "$ENC_IF.tmp" && mv "$ENC_IF.tmp" "$ENC_IF"
+  echo "  enc_if.c の dhf 仮定義を extern 宣言に直した"
+else
+  echo "  enc_if.c の dhf は宣言済み"
+fi
+
+cat > "$SRC/stub3gp.c.tmp" <<'STUB3GP_EOF'
+/* STD-T115 QPSK ナロー方式デコーダ用のスタブ。
+ *
+ * 3GP コンテナ読み書きは Windows の er-libisomedia.dll 側にしか実装が無い。
+ * こちらは生ビットストリーム（-ff raw）だけを使うので、呼ばれたら明示的に
+ * 失敗させる。信号処理には関与しない。
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include "include/amr_plus.h"
+
+static void amrwbp_no_3gp(const char *fn)
+{
+   fprintf(stderr, "%s: 3GP container is not supported in this build; use -ff raw\n", fn);
+   exit(EXIT_FAILURE);
+}
+
+int Create3GPAMRWBPlus(void) { amrwbp_no_3gp("Create3GPAMRWBPlus"); return 0; }
+int Create3GPAMRWB(void) { amrwbp_no_3gp("Create3GPAMRWB"); return 0; }
+int WriteSamplesAMRWBPlus(EncoderConfig conf, void *Serial, int length)
+{
+   (void) conf; (void) Serial; (void) length;
+   amrwbp_no_3gp("WriteSamplesAMRWBPlus"); return 0;
+}
+int Close3GP(char *filename) { (void) filename; amrwbp_no_3gp("Close3GP"); return 0; }
+int GetNextFrame3GP(short *tfi, int *bfi, short *extension, short *mode,
+                    short *st_mode, short *fst, void *serial, int init)
+{
+   (void) tfi; (void) bfi; (void) extension; (void) mode;
+   (void) st_mode; (void) fst; (void) serial; (void) init;
+   amrwbp_no_3gp("GetNextFrame3GP"); return 0;
+}
+int Open3GP(short *tfi, int *bfi, char *filename, int verbose, DecoderConfig *conf)
+{
+   (void) tfi; (void) bfi; (void) filename; (void) verbose; (void) conf;
+   amrwbp_no_3gp("Open3GP"); return 0;
+}
+STUB3GP_EOF
+# 中身が同じなら触らない（毎回書き換えると make の再ビルド判断が濁る）。
+if cmp -s "$SRC/stub3gp.c.tmp" "$SRC/stub3gp.c" 2>/dev/null; then
+  rm -f "$SRC/stub3gp.c.tmp"
+  echo "  3GP スタブは最新"
+else
+  mv "$SRC/stub3gp.c.tmp" "$SRC/stub3gp.c"
+  echo "  3GP スタブを書き出し: stub3gp.c"
+fi
 
 echo "==> ビルド"
 CC="${CC:-cc}"

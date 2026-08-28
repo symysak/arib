@@ -26,8 +26,13 @@ mkdir -p "$PKG"
 
 install -m 0755 "$BIN" "$PKG/$(basename "$BIN")"
 
-for dir in "$@"; do
-    [ -d "$dir" ] || { echo "同梱するディレクトリが無い: $dir" >&2; exit 1; }
+for item in "$@"; do
+    if [ -f "$item" ]; then
+        install -m 0755 "$item" "$PKG/$(basename "$item")"
+        continue
+    fi
+    dir="$item"
+    [ -d "$dir" ] || { echo "同梱するものが無い: $dir" >&2; exit 1; }
     mkdir -p "$PKG/$(dirname "$dir")"
     cp -R "$dir" "$PKG/$dir"
     if [ "$dir" = "build/g7221" ]; then

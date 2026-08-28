@@ -38,6 +38,8 @@ Windows on ARM 向けは配布していない（x64 版がエミュレーショ�
 - `build/g7221/` — `std-t86` の zip のみ。音声デコーダ（ITU-T G.722.1）。
   **実行ファイルと同じ場所に置いたままにすること**（実行ファイルからの相対位置で探すので、
   消すと音声だけ出なくなる。受信と制御チャネルの復号は動く）
+- `build_amrwbplus.ps1`（Windows）/ `build_amrwbplus.sh`（macOS・Linux）
+  — `std-t115-qpsknarrow` の zip のみ。音声デコーダ（AMR-WB+）を作るスクリプト（下記）
 - `sdrsharp-plugin/` — Windows 版のみ。SDR# から I/Q を TCP で流すプラグイン（手順 2）
 - `readme.md` — これ
 
@@ -49,18 +51,32 @@ Windows on ARM 向けは配布していない（x64 版がエミュレーショ�
 xattr -dr com.apple.quarantine <展開したフォルダ>
 ```
 
-### STD-T115 の音声だけはビルドが要る
+### STD-T115 の音声だけは 1 回スクリプトを走らせる
 
 `std-t115-qpsknarrow` の zip には **AMR-WB+（3GPP TS 26.304）を同梱していない**。3GPP の
-配布物は書面の許可なく再頒布できないため。音を出すにはソースツリーで
+配布物は書面の許可なく再頒布できないため。代わりに、取得・パッチ・ビルドまでを行う
+スクリプトが zip に入っている。**展開したフォルダの中でそのまま実行するだけ**でよい
+（出力先は自動で実行ファイルの隣になる）。
 
-```sh
-bash scripts/std-t115/build_amrwbplus.sh      # Windows: pwsh scripts/std-t115/build_amrwbplus.ps1
+**Windows** — `build_amrwbplus.ps1` を右クリック →「PowerShell で実行」。
+コンパイラが要らない: **gcc が無ければ MinGW-w64（WinLibs）を winget で入れる**
+（winget が使えなければ WinLibs を直接ダウンロードして zip 内の `build\toolchain\` へ
+展開する）。管理者権限も Python も要らない。
+
+```powershell
+.\build_amrwbplus.ps1
 ```
 
-を実行し、出来た `build/amrwbplus/` を実行ファイルの隣へ置く（C コンパイラが要る。
-Windows は MinGW-w64 の gcc/clang。MSVC の cl は非対応）。制御チャネルの復号と画面表示は
-zip の中身だけで動く。
+**macOS / Linux** — C コンパイラが要る（macOS は `xcode-select --install`、
+Linux は `build-essential` 等）。あとは curl と unzip だけ。
+
+```sh
+bash ./build_amrwbplus.sh
+```
+
+どちらも数分かかり、終わると `build/amrwbplus/amrwbp_decoder` が出来る。あとは
+デコーダを起動し直せば音が鳴る。**このフォルダは実行ファイルと同じ場所に置いたままにする**
+（消しても受信と制御チャネルの復号は動くが、音だけ出なくなる）。
 
 `std-t86` の音声（G.722.1）は zip に入っているので、そのまま音が出る。
 
@@ -141,7 +157,8 @@ Windows は `std-t86.exe` / `std-t115-qpsknarrow.exe`（コマンドプロンプ
 ## 音が出ないとき
 
 1. **`build/` フォルダを実行ファイルの隣に置いたままか**（手順 1）。STD-T115 は
-   `build/amrwbplus/` を自分でビルドして置く。未配置だと画面のログに警告が出る。
+   同梱の `build_amrwbplus.ps1` / `build_amrwbplus.sh` を 1 回走らせて
+   `build/amrwbplus/` を作る。未配置だと画面のログに警告が出る。
 2. **「再生開始」を押したか**。ブラウザは操作なしに音を鳴らせない。
 3. **同期しているか**。画面上部の CRC 一致率が 0 のままなら、`--fs` が SDR 側の送出レートと
    合っていないか、`--fmt` の形式が違うか、チャネルに同調できていない。
@@ -150,8 +167,7 @@ Windows は `std-t86.exe` / `std-t115-qpsknarrow.exe`（コマンドプロンプ
 
 ## ソースからビルドする
 
-配布していない OS / CPU で動かしたいときや、自分で改造するとき。Go と C コンパイラ、
-Python 3（標準ライブラリのみ）が要る。
+配布していない OS / CPU で動かしたいときや、自分で改造するとき。Go と C コンパイラが要る。
 
 ```sh
 # デコーダ本体
@@ -164,7 +180,9 @@ bash scripts/std-t115/build_amrwbplus.sh   # STD-T115 用（AMR-WB+）
 ```
 
 Windows は `pwsh scripts/std-t86/build_g7221.ps1` /
-`pwsh scripts/std-t115/build_amrwbplus.ps1`（MinGW-w64 の gcc/clang が要る。MSVC cl は非対応）。
+`pwsh scripts/std-t115/build_amrwbplus.ps1`。MSVC の `cl` は非対応（gcc 系が要る）だが、
+**どちらのスクリプトも gcc が無ければ自分で MinGW-w64 を用意する**ので、
+用意しておくのは Go だけでよい。
 
 音声デコーダのビルドは必須ではないが、無いと**音が出ない**（制御チャネルの復号と画面表示は
 動く）。AMR-WB+ の参照ソースは再頒布できないため、スクリプトが取得・パッチ・ビルドまでを行う。

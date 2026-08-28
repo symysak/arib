@@ -130,18 +130,11 @@ func binaryPath() (string, error) {
 	if runtime.GOOS == "windows" {
 		names = []string{"amrwbp_decoder.exe", "amrwbp_decoder"}
 	}
-	var dirs []string
-	if d := os.Getenv("STDT115_AMRWBP_DIR"); d != "" {
-		dirs = append(dirs, d)
-	}
+	exeDir := ""
 	if exe, err := os.Executable(); err == nil {
-		dirs = append(dirs, filepath.Dir(exe))
+		exeDir = filepath.Dir(exe)
 	}
-	up := ""
-	for i := 0; i < 6; i++ {
-		dirs = append(dirs, filepath.Join(up, "build", "amrwbplus"))
-		up = filepath.Join(up, "..")
-	}
+	dirs := searchDirs(os.Getenv("STDT115_AMRWBP_DIR"), exeDir)
 	var cands []string
 	for _, d := range dirs {
 		for _, n := range names {
@@ -157,8 +150,25 @@ func binaryPath() (string, error) {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("amrwbp_decoder が見つかりません（bash scripts/std-t115/build_amrwbplus.sh を実行してください。"+
-		"場所を指定するなら STDT115_AMRWBP_DIR）: 探した先 %s", strings.Join(cands, ", "))
+	return "", fmt.Errorf("amrwbp_decoder が見つかりません（bash build_amrwbplus.sh / "+
+		"pwsh build_amrwbplus.ps1 を実行してください。場所を指定するなら STDT115_AMRWBP_DIR）: "+
+		"探した先 %s", strings.Join(cands, ", "))
+}
+
+func searchDirs(env, exeDir string) []string {
+	var dirs []string
+	if env != "" {
+		dirs = append(dirs, env)
+	}
+	if exeDir != "" {
+		dirs = append(dirs, filepath.Join(exeDir, "build", "amrwbplus"), exeDir)
+	}
+	up := ""
+	for i := 0; i < 6; i++ {
+		dirs = append(dirs, filepath.Join(up, "build", "amrwbplus"))
+		up = filepath.Join(up, "..")
+	}
+	return dirs
 }
 
 func Available() bool {

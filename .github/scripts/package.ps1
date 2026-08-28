@@ -1,9 +1,10 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param(
     [Parameter(Mandatory = $true)][string]$Goos,
     [Parameter(Mandatory = $true)][string]$Goarch,
     [Parameter(Mandatory = $true)][string]$Binary,
     [string[]]$BuildDirs = @(),
+    [string[]]$ExtraFiles = @(),
     [string]$PluginDll
 )
 $ErrorActionPreference = 'Stop'
@@ -39,6 +40,11 @@ try {
             Copy-Item -LiteralPath (Join-Path $ItuSrc 'Readme.txt') `
                 -Destination (Join-Path $Pkg 'build\g7221\ITU-G.722.1-Readme.txt')
         }
+    }
+
+    foreach ($file in $ExtraFiles) {
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "同梱するファイルが無い: $file" }
+        Copy-Item -LiteralPath $file -Destination (Join-Path $Pkg (Split-Path -Leaf $file))
     }
 
     Copy-Item -LiteralPath 'readme.md' -Destination (Join-Path $Pkg 'readme.md')
