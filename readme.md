@@ -63,15 +63,6 @@ xattr -dr com.apple.quarantine <展開したフォルダ>
 （winget が使えなければ WinLibs を直接ダウンロードして zip 内の `build\toolchain\` へ
 展開する）。管理者権限も Python も要らない。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\build_amrwbplus.ps1
-```
-
-`-ExecutionPolicy Bypass` は、ダウンロードした zip の中の `.ps1` が既定の実行ポリシー
-（RemoteSigned）で `is not digitally signed` と弾かれるため（右クリック →「PowerShell で実行」も
-同じことをする）。`powershell` は Windows 標準の 5.1 で、追加インストールは要らない
-（PowerShell 7 を入れてあれば `pwsh` でも同じ）。
-
 **macOS / Linux** — C コンパイラが要る（macOS は `xcode-select --install`、
 Linux は `build-essential` 等）。あとは curl と unzip だけ。
 
