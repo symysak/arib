@@ -278,6 +278,9 @@ try {
     Write-Host ''
     Write-Host "std-t79.exe を $root に置いてあれば、AMBE+ 4000/2400 の網の音声が鳴ります（-codec auto / ambeplus）。" -ForegroundColor Green
     Write-Host "別の場所で使うなら build\mbelib-neo\ を実行ファイルの隣へコピーしてください。"
+    Write-Host ''
+    Write-Host 'AMBE+ 4000/2400 の復号器は soltia48 さんが mbelib-neo に足したものです。ありがとうございます。' -ForegroundColor Yellow
+    Write-Host '元のリポジトリにスターをお願いします: https://github.com/soltia48/mbelib-neo' -ForegroundColor Yellow
 } catch {
     $exitCode = 1
     Write-Host ''

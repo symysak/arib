@@ -67,3 +67,6 @@ cc -O2 -std=gnu11 -DMBE_BUILDING=1 -I"$src/include" -I"$out/include" -I"$src" -I
    "$src/src/core/mbe_pcm_convert.c" "$src/src/core/mbe_adaptive.c" "$src/src/core/mbe_unvoiced_fft.c" \
    "$src/src/external/pffft/pffft.c" "$src/src/external/pffft/fftpack.c" -lm
 echo "できました: $out/ambeplus_decode"
+echo
+echo "AMBE+ 4000/2400 の復号器は soltia48 さんが mbelib-neo に足したものです。ありがとうございます。"
+echo "元のリポジトリにスターをお願いします: https://github.com/soltia48/mbelib-neo"
