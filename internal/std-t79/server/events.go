@@ -61,6 +61,7 @@ type CarrierInfo struct {
 	CFOHz    float64 `json:"cfo_hz"`
 	LevelDB  float64 `json:"level_db"`
 	Codec string `json:"codec,omitempty"`
+	Audio AudioSlots `json:"audio"`
 
 	SlotsN    int `json:"slots_n"`
 	SWFound   int `json:"sw_found"`
@@ -156,6 +157,7 @@ type Station struct {
 	SACCHPct float64   `json:"sacch_pct"`
 	Calls    int       `json:"calls"`
 	Codec    string    `json:"codec,omitempty"`
+	Audio AudioSlots `json:"audio"`
 }
 
 type ChannelSnapshot struct {

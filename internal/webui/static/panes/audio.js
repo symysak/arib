@@ -28,6 +28,7 @@ export function init(store) {
     </div>
     <div class="row"><span class="badge idle" id="au-now">再生を開始してください</span></div>
     <div class="row"><span class="tiny muted">聴取中</span><select id="au-ch" class="btn"></select></div>
+    <div id="au-ext"></div>
     <canvas id="au-meter" style="width:100%;height:10px;display:block;margin:4px 0"></canvas>
     <dl class="kv">
       <dt>受信</dt><dd id="au-recv">0 秒</dd>
@@ -36,6 +37,7 @@ export function init(store) {
     </dl>`;
 
   const $ = (id) => document.getElementById(id);
+  const extUpdate = spec.mount ? spec.mount($('au-ext'), store) : null;
   let ctx = null, gain = null, listening = -1;
   let receivedSec = 0, dropped = 0, level = 0;
   const streams = new Map();
@@ -224,6 +226,7 @@ export function init(store) {
       const vals = spec.draw(st, s) || {};
       for (const r of spec.rows || []) { const d = $(r.id); if (d) d.textContent = vals[r.id] ?? '-'; }
     }
+    if (extUpdate) extUpdate(st, s);
     const on = ctx && ctx.state === 'running';
     sub.textContent = !on ? '停止中' : playAll() ? '全局' : st ? `${st.mhz.toFixed(4)} MHz` : '停止中';
     $('au-start').textContent = on ? '再生中' : '再生開始';

@@ -46,34 +46,35 @@ type callState struct {
 	on         bool
 	base       string
 	t0         float64
-	lastBusy   float64
-	busyRun    int
-	idleRun    int
-	early      []decoder.TCHFrame
-	tchW       *bufio.Writer
-	tchF       *os.File
-	idxW       *bufio.Writer
-	idxF       *os.File
-	calls      *os.File
-	voice      int
-	facch      int
-	init       int
-	known      bool
-	tr         *voice.Tracker
-	hist       []decoder.TCHFrame
-	audio      *audioBuf
-	pendCall   *l3.Call
-	pendCtl    float64
-	pendSrc    string
-	upFrame    int64
-	upRun      int
-	lastRCH    string
-	mode       l3.CallType
-	modeRank   int
-	modeSrc    string
-	stats      modeStats
-	peer       string
-	lastCC     string
+	seq      int64
+	lastBusy float64
+	busyRun  int
+	idleRun  int
+	early    []decoder.TCHFrame
+	tchW     *bufio.Writer
+	tchF     *os.File
+	idxW     *bufio.Writer
+	idxF     *os.File
+	calls    *os.File
+	voice    int
+	facch    int
+	init     int
+	known    bool
+	tr       *voice.Tracker
+	hist     []decoder.TCHFrame
+	audio    *audioBuf
+	pendCall *l3.Call
+	pendCtl  float64
+	pendSrc  string
+	upFrame  int64
+	upRun    int
+	lastRCH  string
+	mode     l3.CallType
+	modeRank int
+	modeSrc  string
+	stats    modeStats
+	peer     string
+	lastCC   string
 	data bool
 	vclock string
 }
@@ -92,6 +93,7 @@ type Channel struct {
 	proc     int64
 	lastEmit float64
 	calls    [4]callState
+	callSeq int64
 	idle   [4]*idleTCH
 	vs     voiceState
 	mix    audioMixer
@@ -285,6 +287,7 @@ func (c *Channel) Feed(wide []complex64) {
 	}
 	c.nowT = now
 	car := c.car
+	car.Audio = c.mix.state()
 	emit := now-c.lastEmit >= emitSec
 	if emit {
 		for n := range c.slotView {
@@ -535,7 +538,8 @@ func (c *Channel) startCall(n int, s *decoder.Slot, now float64) {
 	cs := &c.calls[n]
 	label := fmt.Sprintf("s%d", n)
 	base := c.sink.RecOpen(n, label, recLagSec+math.Max(0, now-s.TSec))
-	*cs = callState{on: true, base: base, t0: now, lastBusy: now, busyRun: cs.busyRun, early: cs.early, pendCall: cs.pendCall,
+	c.callSeq++
+	*cs = callState{on: true, base: base, t0: now, seq: c.callSeq, lastBusy: now, busyRun: cs.busyRun, early: cs.early, pendCall: cs.pendCall,
 		pendCtl: cs.pendCtl, pendSrc: cs.pendSrc, stats: modeStats{sbPrev: -1}, upFrame: cs.upFrame, upRun: cs.upRun,
 		talker: cs.talker, selcall: cs.selcall, lastPICH: cs.lastPICH, dupWith: -1, lastTalker: -1}
 	c.mu.Lock()
@@ -702,6 +706,7 @@ func (c *Channel) Close(dropped bool) {
 	c.mu.Lock()
 	c.closed, c.car.Locked = true, false
 	car := c.car
+	car.Audio = c.mix.state()
 	c.mu.Unlock()
 	c.sink.Emit(Event{Type: EvT79, Data: &Detail{Carrier: car}})
 	stn := c.station()
@@ -783,7 +788,9 @@ func (c *Channel) Snapshot(ext map[string]any) { ext["t79"] = c.snapshot() }
 func (c *Channel) snapshot() ChannelSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return ChannelSnapshot{Carrier: c.car}
+	car := c.car
+	car.Audio = c.mix.state()
+	return ChannelSnapshot{Carrier: car}
 }
 
 func (c *Channel) station() Station {
@@ -794,6 +801,7 @@ func (c *Channel) station() Station {
 		Synced: !c.closed && c.car.Locked, Recording: c.recOn > 0, LastTSec: c.nowT,
 		Ext: map[string]any{"talking": c.recOn > 0}}
 	s.Kind, s.CC, s.Org, s.Calls, s.Codec = kind, cc, c.org, c.car.Calls, c.car.Codec
+	s.Audio = c.mix.state()
 	s.Dir, s.PairMHz = c.dirName(), c.cfg.MHz+UpOffsetMHz
 	if c.up != nil {
 		s.PairMHz = c.cfg.MHz - UpOffsetMHz

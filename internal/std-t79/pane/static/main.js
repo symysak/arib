@@ -3,6 +3,7 @@
 
 import { store } from "./store.js";
 import "./t79.js";
+import * as audioSlots from "./panes/audioslots.js";
 import * as link from "./panes/link.js";
 import * as stations from "./panes/stations.js";
 import * as timeline from "./panes/timeline.js";
@@ -19,6 +20,8 @@ import * as system from "./panes/system.js";
 import * as recordings from "./panes/recordings.js";
 import * as log from "./panes/log.js";
 import * as settings from "./panes/settings.js";
+
+store.extend({ audio: { mount: audioSlots.mount } });
 
 for (const pane of [link, stations, timeline, carrier, signal, audio, quality, calls, network, l1, l2, l3, system,
   recordings, log, settings]) {

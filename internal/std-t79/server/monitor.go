@@ -198,6 +198,41 @@ func NewMonitor(cfg Config) *Monitor {
 		m.std.selected.Store(int64(v))
 		w.WriteHeader(http.StatusNoContent)
 	})
+	m.w.Mux().HandleFunc("/api/audio-slots", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		idx, err := strconv.Atoi(q.Get("idx"))
+		if err != nil {
+			http.Error(w, "idx が不正です", http.StatusBadRequest)
+			return
+		}
+		var slots [4]bool
+		for _, f := range strings.Split(q.Get("slots"), ",") {
+			if f == "" {
+				continue
+			}
+			n, err := strconv.Atoi(f)
+			if err != nil || n < 0 || n > 3 {
+				http.Error(w, "slots は 0〜3 のカンマ区切り", http.StatusBadRequest)
+				return
+			}
+			slots[n] = true
+		}
+		m.mu.Lock()
+		c := m.chans[idx]
+		m.mu.Unlock()
+		if c == nil {
+			http.Error(w, "その局はありません", http.StatusNotFound)
+			return
+		}
+		if err := c.SetAudioSlots(q.Get("mode"), slots); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		m.onEmit(idx, Event{Type: EvT79, Data: &Detail{Carrier: c.snapshot().Carrier}})
+		stn := c.station()
+		m.onEmit(idx, Event{Type: EvStation, Station: &stn})
+		w.WriteHeader(http.StatusNoContent)
+	})
 	m.w.Mux().HandleFunc("/api/l1all", func(w http.ResponseWriter, r *http.Request) {
 		on := r.URL.Query().Get("on") == "1"
 		m.std.l1All.Store(on)

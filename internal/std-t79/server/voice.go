@@ -3,6 +3,7 @@ package server
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -75,24 +76,124 @@ type audioMixer struct {
 	fifo   [4][]int16
 	active [4]bool
 	out    func(pcm []int16)
+	mode   string
+	allow  [4]bool
+	owner  int
+	order  [4]int64
+	level  [4]float64
+}
+
+const (
+	audioAll   = "all"
+	audioFixed = "fixed"
+	audioFirst = "first"
+)
+
+type AudioSlots struct {
+	Mode  string  `json:"mode"`
+	Slots [4]bool `json:"slots"`
+	Now   int     `json:"now"`
+	Levels [4]float64 `json:"levels"`
 }
 
 const mixLag = voice.SampleRate / 2
 
-func (m *audioMixer) start(n int) {
+func (m *audioMixer) plays(i int) bool {
+	if !m.active[i] {
+		return false
+	}
+	switch m.mode {
+	case audioFixed:
+		return m.allow[i]
+	case audioFirst:
+		return i == m.owner
+	}
+	return true
+}
+
+func (m *audioMixer) pickOwner() {
+	m.owner = -1
+	for i, on := range m.active {
+		if on && (m.owner < 0 || m.order[i] < m.order[m.owner]) {
+			m.owner = i
+		}
+	}
+}
+
+func (c *Channel) SetAudioSlots(mode string, slots [4]bool) error {
+	switch mode {
+	case audioAll, audioFixed, audioFirst:
+	default:
+		return fmt.Errorf("mode は all / fixed / first: %q", mode)
+	}
+	c.mix.set(mode, slots)
+	return nil
+}
+
+func (m *audioMixer) set(mode string, allow [4]bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mode == audioFirst && m.mode != audioFirst {
+		m.pickOwner()
+	}
+	m.mode, m.allow = mode, allow
+	for i := range m.fifo {
+		if !m.plays(i) {
+			m.fifo[i] = nil
+		}
+	}
+}
+
+func (m *audioMixer) state() AudioSlots {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := AudioSlots{Mode: m.mode, Slots: m.allow, Now: -1}
+	if st.Mode == "" {
+		st.Mode = audioAll
+	}
+	if m.mode == audioFirst {
+		st.Now = m.owner
+	}
+	for i, l := range m.level {
+		st.Levels[i] = -99
+		if m.active[i] && l > 0 {
+			st.Levels[i] = math.Round(20*math.Log10(l/32768)*10) / 10
+		}
+	}
+	return st
+}
+
+func (m *audioMixer) start(n int, order int64) {
 	m.mu.Lock()
 	m.active[n] = true
+	m.order[n] = order
+	if m.mode == audioFirst && (m.owner < 0 || !m.active[m.owner] || order < m.order[m.owner]) {
+		if m.owner >= 0 {
+			m.fifo[m.owner] = nil
+		}
+		m.owner = n
+	}
 	m.mu.Unlock()
 }
 
 func (m *audioMixer) push(n int, pcm []int16) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if len(pcm) > 0 {
+		var e float64
+		for _, v := range pcm {
+			e += float64(v) * float64(v)
+		}
+		m.level[n] = 0.6*m.level[n] + 0.4*math.Sqrt(e/float64(len(pcm)))
+	}
+	if !m.plays(n) {
+		return
+	}
 	m.fifo[n] = append(m.fifo[n], pcm...)
 	for {
 		k, longest, any := -1, 0, false
-		for i, on := range m.active {
-			if !on {
+		for i := range m.active {
+			if !m.plays(i) {
 				continue
 			}
 			any = true
@@ -123,6 +224,10 @@ func (m *audioMixer) end(n int) {
 	}
 	m.active[n] = false
 	m.fifo[n] = nil
+	m.level[n] = 0
+	if m.mode == audioFirst && m.owner == n {
+		m.pickOwner()
+	}
 }
 
 func (m *audioMixer) emit(k int) {
@@ -271,7 +376,7 @@ func (c *Channel) newTracker(n int) *voice.Tracker {
 	if audio := c.std.audio; audio != nil && c.mix.out == nil {
 		c.mix.out = func(pcm []int16) { audio(id, pcm, voice.SampleRate) }
 	}
-	c.mix.start(n)
+	c.mix.start(n, cs.seq)
 	tr.Sink = func(pcm []int16) {
 		buf.mu.Lock()
 		buf.pcm = append(buf.pcm, pcm...)
