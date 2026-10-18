@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/citycodes"
 )
 
 type TargetKind string

@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/citycodes"
+	"github.com/symysak/arib/internal/credit"
 	"github.com/symysak/arib/internal/std-t86/control"
 	"github.com/symysak/arib/internal/std-t86/decoder"
 )
@@ -134,6 +135,7 @@ type qualityInfo struct {
 type snapshot struct {
 	Type string  `json:"type"`
 	T    float64 `json:"t"`
+	Generator string `json:"generator"`
 	T0WallMS int64 `json:"t0_wall_ms"`
 	T0Estimated bool `json:"t0_estimated"`
 	T0Source string `json:"t0_source"`
@@ -182,6 +184,7 @@ type liveState struct {
 	crcOKRate  *float64
 	syncLocked bool
 	overflows  int
+	slots slotBoard
 
 	squelchEnabled  bool
 	broadcastStrict bool
@@ -195,7 +198,7 @@ type liveState struct {
 
 func newLiveState(seed, municipalCode int) *liveState {
 	return &liveState{
-		seed: seed, municipalCode: municipalCode,
+		seed: seed, lastSeed: seed, municipalCode: municipalCode,
 		tchCounts:       map[string]int{},
 		windows:         map[int]*windowInfo{},
 		squelchEnabled:  true,
@@ -432,6 +435,7 @@ func (s *liveState) snapshot() snapshot {
 	}
 	return snapshot{
 		Type:            "snapshot",
+		Generator:       credit.Generator,
 		T:               round(s.t, 1),
 		T0WallMS:        s.origin.WallMS,
 		T0Estimated:     s.origin.Estimated,

@@ -58,19 +58,26 @@ type Decimator struct {
 func NewDecimator(fs float64, factor int) *Decimator {
 	d := &Decimator{factor: factor}
 	if factor > 1 {
-		nyqOut := fs / float64(factor) / 2
-		cutoff := math.Min(0.8*nyqOut, nyqOut-1000)
-		if cutoff <= 0 {
-			cutoff = 0.8 * nyqOut
-		}
-		numtaps := int(math.Max(31, 6*fs/math.Max(nyqOut, 1))) | 1
-		d.taps = Firwin(numtaps, cutoff/(fs/2))
+		d.taps = antiAliasTaps(fs, fs/float64(factor)/2)
 	}
 	return d
 }
 
+func NewLowpass(fs, nyqOut float64) *Decimator {
+	return &Decimator{factor: 1, taps: antiAliasTaps(fs, nyqOut)}
+}
+
+func antiAliasTaps(fs, nyqOut float64) []float64 {
+	cutoff := math.Min(0.8*nyqOut, nyqOut-1000)
+	if cutoff <= 0 {
+		cutoff = 0.8 * nyqOut
+	}
+	numtaps := int(math.Max(31, 6*fs/math.Max(nyqOut, 1))) | 1
+	return Firwin(numtaps, cutoff/(fs/2))
+}
+
 func (d *Decimator) Process(x []complex64) []complex64 {
-	if d.factor == 1 {
+	if d.taps == nil {
 		return x
 	}
 	d.hist = append(d.hist, x...)
@@ -209,4 +216,32 @@ func FFTShiftedFreq(nfft int, fs float64) []float64 {
 		out[i] = float64(i-nfft/2) * fs / float64(nfft)
 	}
 	return out
+}
+
+func Spectrum(x []complex64, n int) []float64 {
+	if n <= 0 || n&(n-1) != 0 || len(x) < n {
+		return nil
+	}
+	win := make([]float64, n)
+	for i := range win {
+		win[i] = 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(n-1))
+	}
+	acc := make([]float64, n)
+	work := make([]complex128, n)
+	frames := 0
+	for off := 0; off+n <= len(x); off += n / 2 {
+		for i := 0; i < n; i++ {
+			v := x[off+i]
+			work[i] = complex(float64(real(v))*win[i], float64(imag(v))*win[i])
+		}
+		fft(work)
+		for i, v := range work {
+			acc[i] += real(v)*real(v) + imag(v)*imag(v)
+		}
+		frames++
+	}
+	for i := range acc {
+		acc[i] /= float64(frames)
+	}
+	return acc
 }

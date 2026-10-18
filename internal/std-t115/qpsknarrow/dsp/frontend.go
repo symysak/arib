@@ -31,7 +31,11 @@ func NewFrontEnd(cfg Config) *FrontEnd {
 	if factor < 1 {
 		factor = 1
 	}
-	f.dec = NewDecimator(cfg.SampleRate, factor)
+	if factor == 1 && cfg.SampleRate > f.fsSym {
+		f.dec = NewLowpass(cfg.SampleRate, f.fsSym/2)
+	} else {
+		f.dec = NewDecimator(cfg.SampleRate, factor)
+	}
 	f.fs1 = cfg.SampleRate / float64(factor)
 	f.res = NewCubicResampler(f.fs1, f.fsSym)
 	f.rrc = RootRaisedCosine(f.fsSym, 1.0/SymbolRate, RollOff, 8)

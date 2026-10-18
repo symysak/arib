@@ -1,14 +1,16 @@
 package server
 
 import (
-	"encoding/json"
-
 	"github.com/symysak/arib/internal/std-t115/qpsknarrow/control"
 	"github.com/symysak/arib/internal/std-t115/qpsknarrow/municipality"
 )
 
 const (
 	EvSnapshot       = "snapshot"
+	EvStation        = "station"
+	EvStationGone    = "station_gone"
+	EvLog            = "log"
+	EvMeta           = "meta"
 	EvFrame          = "frame"
 	EvControl        = "control"
 	EvBroadcastStart = "broadcast_start"
@@ -17,13 +19,16 @@ const (
 	EvSignal         = "signal"
 	EvConstellation  = "constellation"
 	EvScramble       = "scramble"
-	EvLog            = "log"
-	EvFinished       = "finished"
 )
 
 type Event struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type     string    `json:"type"`
+	Idx      int       `json:"idx"`
+	Snapshot *Snapshot `json:"snapshot,omitempty"`
+	Meta     *Meta     `json:"meta,omitempty"`
+	Station  *Station  `json:"station,omitempty"`
+	Log      *LogLine  `json:"log,omitempty"`
+	Data     any       `json:"data,omitempty"`
 }
 
 type FrameInfo struct {
@@ -92,6 +97,7 @@ type BroadcastInfo struct {
 	EndReason string `json:"end_reason,omitempty"`
 	AudioURL string `json:"audio_url,omitempty"`
 	IQURL string `json:"iq_url,omitempty"`
+	Base string `json:"base,omitempty"`
 }
 
 type ScrambleInfo struct {
@@ -152,56 +158,75 @@ type ConstellationInfo struct {
 	Points []float32 `json:"points"`
 }
 
-type LogInfo struct {
-	TSec  float64 `json:"t_sec"`
-	Level string  `json:"level"`
-	Text  string  `json:"text"`
+type LogLine struct {
+	TSec float64 `json:"t_sec"`
+	Idx int `json:"idx"`
+	Group string `json:"group"`
+	Level string `json:"level"`
+	Text  string `json:"text"`
 }
 
-type Snapshot struct {
+type Meta struct {
+	Input      string    `json:"input"`
+	CenterMHz  float64   `json:"center_mhz"`
+	SampleRate float64   `json:"sample_rate"`
+	GainDB     float64   `json:"gain_db"`
+	Channels   []float64 `json:"channels"`
+	LogDir     string    `json:"log_dir"`
 	T0WallMS int64 `json:"t0_wall_ms"`
-	T0Estimated bool `json:"t0_estimated"`
+	Estimated bool `json:"t0_estimated"`
+	Finished  bool `json:"finished"`
+	Network   bool `json:"network"`
+	Scan      bool `json:"scan"`
 
-	Source     string  `json:"source"`
-	SourceDesc string  `json:"source_desc"`
-	Network    bool    `json:"network"`
-	SampleRate float64 `json:"sample_rate"`
-	OffsetHz   float64 `json:"offset_hz"`
-	DurationS  float64 `json:"duration_sec"`
-	Realtime   bool    `json:"realtime"`
-
-	System       string  `json:"system"`
-	SymbolRate   float64 `json:"symbol_rate"`
-	FrameBits    int     `json:"frame_bits"`
-	RollOff      float64 `json:"roll_off"`
-	SW1Hex       string  `json:"sw1_hex"`
-	SW3Hex       string  `json:"sw3_hex"`
-	ScrambleInit int     `json:"scramble_init"`
+	System     string  `json:"system"`
+	SymbolRate float64 `json:"symbol_rate"`
+	FrameBits  int     `json:"frame_bits"`
+	RollOff    float64 `json:"roll_off"`
+	SW1Hex     string  `json:"sw1_hex"`
+	SW3Hex     string  `json:"sw3_hex"`
 
 	AudioAvailable bool `json:"audio_available"`
 	AudioRate      int  `json:"audio_rate"`
-
-	LogDir  string `json:"log_dir"`
-	LogPath string `json:"log_path"`
 	IQRate float64 `json:"iq_rate"`
-	Scramble ScrambleInfo `json:"scramble"`
+}
 
+type Station struct {
+	Idx      int     `json:"idx"`
+	MHz      float64 `json:"mhz"`
+	OffsetHz float64 `json:"offset_hz"`
+	Watched bool `json:"watched"`
+	Synced    bool     `json:"synced"`
+	Recording bool     `json:"recording"`
+	LevelDB   *float64 `json:"level_db,omitempty"`
+	LastTSec  float64  `json:"last_t_sec"`
+	Ext      map[string]any `json:"ext"`
+	Scramble ScrambleInfo   `json:"scramble"`
+	Frames   int            `json:"frames"`
+	CCHOK    int            `json:"cch_ok"`
+	CCHTotal int            `json:"cch_total"`
+	TCHOK    int            `json:"tch_ok"`
+	TCHTotal int            `json:"tch_total"`
+	Broadcasts int `json:"broadcasts"`
+	Current    int `json:"current"`
+}
+
+type ChannelSnapshot struct {
+	Scramble      ScrambleInfo      `json:"scramble"`
 	Quality       QualityInfo       `json:"quality"`
 	Signal        SignalInfo        `json:"signal"`
 	Constellation ConstellationInfo `json:"constellation"`
 	Controls      []ControlInfo     `json:"controls"`
 	Broadcasts    []BroadcastInfo   `json:"broadcasts"`
 	Frames        []FrameInfo       `json:"frames"`
-	Logs          []LogInfo         `json:"logs"`
 	Current       *BroadcastInfo    `json:"current,omitempty"`
 }
 
-func mustJSON(v any) json.RawMessage {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return json.RawMessage(`null`)
-	}
-	return b
+type Snapshot struct {
+	Generator string    `json:"generator"`
+	Meta      Meta      `json:"meta"`
+	Stations  []Station `json:"stations"`
+	Logs      []LogLine `json:"logs"`
+	Recs      []any     `json:"recs"`
+	T115 map[string]ChannelSnapshot `json:"t115"`
 }
-
-func ev(t string, v any) Event { return Event{Type: t, Data: mustJSON(v)} }

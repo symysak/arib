@@ -42,6 +42,13 @@ done
 
 cp readme.md "$PKG/readme.md"
 
+for f in THIRD_PARTY_NOTICES.md; do
+    src="$f"
+    [ -f "$src" ] || src="scripts/public_assets/$f"
+    [ -f "$src" ] || { echo "同梱するものが無い: $f" >&2; exit 1; }
+    cp "$src" "$PKG/$f"
+done
+
 ( cd pkg && zip -q -r "../$NAME.zip" "$NAME" )
 rm -rf pkg
 

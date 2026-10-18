@@ -3,11 +3,11 @@ package amrwbp
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/symysak/arib/internal/extbin"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -125,51 +125,14 @@ func RawStream(superframes [][]Frame) (raw []byte, fer []int) {
 	return raw, fer
 }
 
-func binaryPath() (string, error) {
-	names := []string{"amrwbp_decoder", "amrwbp_decoder.exe"}
-	if runtime.GOOS == "windows" {
-		names = []string{"amrwbp_decoder.exe", "amrwbp_decoder"}
-	}
-	exeDir := ""
-	if exe, err := os.Executable(); err == nil {
-		exeDir = filepath.Dir(exe)
-	}
-	dirs := searchDirs(os.Getenv("STDT115_AMRWBP_DIR"), exeDir)
-	var cands []string
-	for _, d := range dirs {
-		for _, n := range names {
-			cands = append(cands, filepath.Join(d, n))
-		}
-	}
-	for _, c := range cands {
-		if st, err := os.Stat(c); err == nil && !st.IsDir() {
-			abs, err := filepath.Abs(c)
-			if err == nil {
-				return abs, nil
-			}
-			return c, nil
-		}
-	}
-	return "", fmt.Errorf("amrwbp_decoder が見つかりません（bash build_amrwbplus.sh / "+
-		"pwsh build_amrwbplus.ps1 を実行してください。場所を指定するなら STDT115_AMRWBP_DIR）: "+
-		"探した先 %s", strings.Join(cands, ", "))
+var spec = extbin.Spec{
+	Name:   "amrwbp_decoder",
+	EnvVar: "STDT115_AMRWBP_DIR",
+	Dir:    "amrwbplus",
+	Hint:   "bash build_amrwbplus.sh / pwsh build_amrwbplus.ps1 を実行してください",
 }
 
-func searchDirs(env, exeDir string) []string {
-	var dirs []string
-	if env != "" {
-		dirs = append(dirs, env)
-	}
-	if exeDir != "" {
-		dirs = append(dirs, filepath.Join(exeDir, "build", "amrwbplus"), exeDir)
-	}
-	up := ""
-	for i := 0; i < 6; i++ {
-		dirs = append(dirs, filepath.Join(up, "build", "amrwbplus"))
-		up = filepath.Join(up, "..")
-	}
-	return dirs
-}
+func binaryPath() (string, error) { return spec.Find() }
 
 func Available() bool {
 	_, err := binaryPath()

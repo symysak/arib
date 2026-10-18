@@ -3,6 +3,18 @@
 /std-t86.exe
 /std-t115-qpsknarrow
 /std-t115-qpsknarrow.exe
+/std-t61
+/std-t61.exe
+/std-t79
+/std-t79.exe
+/fdma
+/fdma.exe
+/jrcl
+/jrcl.exe
+/elcelp
+/elcelp.exe
+/arib
+/arib.exe
 *.test
 *.out
 
@@ -30,3 +42,21 @@ build/
 .DS_Store
 
 .claude
+rtl-sdr/
+
+# 実波キャプチャは大きいのでリポジトリに入れない（既に追跡しているものは別）。
+# data/ は受信地が分かるものも含むので、新しいものを取り込まないよう明示しておく。
+# 置き場所は data/<規格>/。直下の .wav と、録音日のフォルダの中の生の録音（<時刻>_<周波数>Hz.wav）
+# だけを弾く。既に追跡しているファイルは .gitignore の影響を受けない。
+/data/std-t61/
+/data/*.wav
+/data/std-t86/*.wav
+/data/std-t86/*/*Hz.wav
+/data/std-t115/*.wav
+# 現地調査の置き場（data/<日付>_<地名>/）。フォルダ名だけで受信地が分かる。
+/data/2026*/
+/docs/fdma/*.wav
+
+# go test -c の産物・実行ファイルの退避
+*.test.exe
+/*.exe.*

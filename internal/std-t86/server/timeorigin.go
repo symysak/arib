@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/symysak/arib/internal/rec"
 )
 
 
@@ -27,6 +29,10 @@ func fileTimeOrigin(path string) timeOrigin {
 		base = time.Now()
 	}
 	name := filepath.Base(path)
+
+	if n, ok := rec.Parse(path); ok && !n.Time.IsZero() {
+		return timeOrigin{WallMS: n.Time.UnixMilli(), Source: "ファイル名の受信時刻"}
+	}
 
 	if m := reStampDateTime.FindStringSubmatch(name); m != nil {
 		y, _ := strconv.Atoi(m[1][:4])

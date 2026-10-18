@@ -3,10 +3,10 @@ package g7221
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/symysak/arib/internal/extbin"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -15,38 +15,18 @@ const (
 	SampleRate = 16000
 )
 
+var spec = extbin.Spec{
+	EnvVar:  "STDT86_G7221_DIR",
+	Dir:     "g7221",
+	UsePATH: true,
+	Hint: "`bash scripts/std-t86/build_g7221.sh`" +
+		"（Windows は `pwsh scripts/std-t86/build_g7221.ps1`）を実行してください",
+}
+
 func binaryPath(name string) (string, error) {
-	names := []string{name}
-	if runtime.GOOS == "windows" {
-		names = append(names, name+".exe")
-	}
-	var dirs []string
-	if env := os.Getenv("STDT86_G7221_DIR"); env != "" {
-		dirs = append(dirs, env)
-	}
-	if exe, err := os.Executable(); err == nil {
-		dirs = append(dirs, filepath.Join(filepath.Dir(exe), "build", "g7221"))
-	}
-	if wd, err := os.Getwd(); err == nil {
-		dirs = append(dirs, filepath.Join(wd, "build", "g7221"),
-			filepath.Join(wd, "..", "build", "g7221"))
-	}
-	for _, d := range dirs {
-		for _, n := range names {
-			p := filepath.Join(d, n)
-			if st, err := os.Stat(p); err == nil && !st.IsDir() {
-				return p, nil
-			}
-		}
-	}
-	for _, n := range names {
-		if p, err := exec.LookPath(n); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("%s が見つかりません。`bash scripts/std-t86/build_g7221.sh`"+
-		"（Windows は `pwsh scripts/std-t86/build_g7221.ps1`）を実行してください"+
-		"（または STDT86_G7221_DIR を設定）", name)
+	s := spec
+	s.Name = name
+	return s.Find()
 }
 
 func Available(scodec bool) error {

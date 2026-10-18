@@ -4,18 +4,27 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/symysak/arib/internal/wavio"
 	"io"
 	"os"
 	"sort"
 
+	"github.com/symysak/arib/internal/credit"
+	"github.com/symysak/arib/internal/iqsrc"
 	"github.com/symysak/arib/internal/std-t115/qpsknarrow/amrwbp"
 	dec "github.com/symysak/arib/internal/std-t115/qpsknarrow/decoder"
 	"github.com/symysak/arib/internal/std-t115/qpsknarrow/dsp"
-	"github.com/symysak/arib/internal/std-t115/qpsknarrow/iqsrc"
 	"github.com/symysak/arib/internal/std-t115/qpsknarrow/municipality"
 )
 
 func main() {
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "version", "-version", "--version":
+			fmt.Print(credit.Text("std-t115-qpsknarrow"))
+			os.Exit(0)
+		}
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "live" {
 		os.Exit(cmdLive(os.Args[2:]))
 	}
@@ -42,7 +51,9 @@ func cmdDecode(argv []string) int {
 		fmt.Fprint(os.Stderr, `ARIB STD-T115 QPSK ナロー方式 受信デコーダ
 
   std-t115-qpsknarrow <file> [オプション]        制御チャネルを復号して一覧表示
-  std-t115-qpsknarrow live <file> [オプション]   ライブ Web モニタ（http://127.0.0.1:8000/）
+  std-t115-qpsknarrow live [オプション] -input <入力>[@<中心 MHz>][,gain=<dB>]…   ライブ Web モニタ（局 1 本 / -channels で N 本 / -scan。
+                                                  入力は録音・sdrsharp://・tcp://・rtltcp://。live -h で詳細）
+  std-t115-qpsknarrow version                    バージョンと作者表示
 
 STD-T115 の 3 方式のうち QPSK ナロー方式（Volume 2, チャネル間隔 7.5kHz,
 11.25kbps, 80ms/900bit）専用。STD-T86 とも他 2 方式とも互換性は無い。
@@ -50,6 +61,7 @@ STD-T115 の 3 方式のうち QPSK ナロー方式（Volume 2, チャネル間�
 オプション:
 `)
 		fs.PrintDefaults()
+		fmt.Fprintln(os.Stderr, "\n"+credit.Line())
 	}
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -299,24 +311,5 @@ func writeVoice(path string, sf [][]amrwbp.Frame) error {
 }
 
 func writeWav16(path string, pcm []int16, rate int) error {
-	n := len(pcm) * 2
-	h := make([]byte, 0, 44+n)
-	le32 := func(v uint32) { h = append(h, byte(v), byte(v>>8), byte(v>>16), byte(v>>24)) }
-	le16 := func(v uint16) { h = append(h, byte(v), byte(v>>8)) }
-	h = append(h, "RIFF"...)
-	le32(uint32(36 + n))
-	h = append(h, "WAVEfmt "...)
-	le32(16)
-	le16(1)
-	le16(1)
-	le32(uint32(rate))
-	le32(uint32(rate * 2))
-	le16(2)
-	le16(16)
-	h = append(h, "data"...)
-	le32(uint32(n))
-	for _, v := range pcm {
-		h = append(h, byte(uint16(v)), byte(uint16(v)>>8))
-	}
-	return os.WriteFile(path, h, 0o644)
+	return wavio.Write(path, pcm, 1, rate)
 }

@@ -16,6 +16,7 @@ namespace SDRSharp.IqTcpServer
         private readonly NumericUpDown _portBox;
         private readonly CheckBox _followBox;
         private readonly CheckBox _decimateBox;
+        private readonly NumericUpDown _minRateBox;
         private readonly Button _toggleButton;
         private readonly Label _statusLabel;
         private readonly Label _rateLabel;
@@ -84,6 +85,25 @@ namespace SDRSharp.IqTcpServer
             _decimateBox.CheckedChanged += OnModeChanged;
             row = AddSpanned(layout, _decimateBox, row);
 
+            layout.Controls.Add(new Label
+            {
+                Text = "Min rate (kHz)",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                TextAlign = ContentAlignment.MiddleLeft,
+            }, 0, row);
+            _minRateBox = new NumericUpDown
+            {
+                Minimum = 5,
+                Maximum = 5000,
+                DecimalPlaces = 1,
+                Increment = 5,
+                Value = (decimal)(_ddc.MinOutputRate / 1e3),
+                Dock = DockStyle.Fill,
+            };
+            _minRateBox.ValueChanged += OnModeChanged;
+            layout.Controls.Add(_minRateBox, 1, row++);
+
             _toggleButton = new Button { Text = "Start server", Dock = DockStyle.Fill };
             _toggleButton.Click += OnToggle;
             row = AddSpanned(layout, _toggleButton, row);
@@ -104,7 +124,7 @@ namespace SDRSharp.IqTcpServer
             {
                 ReadOnly = true,
                 Multiline = true,
-                Height = 46,
+                Height = 62,
                 Dock = DockStyle.Fill,
                 Text = string.Empty,
             };
@@ -150,6 +170,7 @@ namespace SDRSharp.IqTcpServer
         {
             _ddc.FollowVfo = _followBox.Checked;
             _ddc.Decimate = _decimateBox.Checked;
+            _ddc.MinOutputRate = (double)_minRateBox.Value * 1e3;
             _plugin.SyncVfoOffset();
             UpdateStatus();
             UpdateCommand();
@@ -206,6 +227,7 @@ namespace SDRSharp.IqTcpServer
             _portBox.Enabled = !running;
             _followBox.Enabled = !running;
             _decimateBox.Enabled = !running && _followBox.Checked;
+            _minRateBox.Enabled = !running && _followBox.Checked && _decimateBox.Checked;
             _statusLabel.Text = running
                 ? string.Format("Listening on 0.0.0.0:{0} — {1} client(s)", _server.Port, _server.ClientCount)
                 : "Stopped";
@@ -235,13 +257,12 @@ namespace SDRSharp.IqTcpServer
 
         private void UpdateCommand()
         {
-            double fs = _sampleRate > 0 ? _ddc.OutputSampleRate : 0.0;
-            string fsText = fs > 0
-                ? fs.ToString("0.##", CultureInfo.InvariantCulture)
-                : "<start the radio>";
-            _commandBox.Text = string.Format(CultureInfo.InvariantCulture,
-                "std-t86 live tcp://127.0.0.1:{0} --offset 0 --fs {1} --fmt cf32",
-                (int)_portBox.Value, fsText);
+            string src = string.Format(CultureInfo.InvariantCulture,
+                "sdrsharp://127.0.0.1:{0}", (int)_portBox.Value);
+            _commandBox.Text =
+                "std-t86 live -input " + src + "\r\n" +
+                "std-t115-qpsknarrow live -input " + src + "\r\n" +
+                "arib probe -input " + src;
         }
 
         private void RunOnUi(Action action)

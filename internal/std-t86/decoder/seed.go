@@ -3,7 +3,7 @@ package decoder
 import (
 	"sort"
 
-	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/citycodes"
 	"github.com/symysak/arib/internal/std-t86/control"
 	"github.com/symysak/arib/internal/std-t86/fec"
 )

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-static="$root/internal/std-t86/server/static"
+static="$root/internal/std-t86/pane/static"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 

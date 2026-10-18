@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
-using System.Threading.Channels;
 
 namespace SDRSharp.IqTcpServer
 {
@@ -11,11 +12,16 @@ namespace SDRSharp.IqTcpServer
     {
         private const int QueueCapacity = 64;
 
+        internal const byte FrameIq = 0x01;
+        internal const byte FrameTuning = 0x02;
+
         private readonly object _sync = new object();
         private readonly List<Client> _clients = new List<Client>();
         private TcpListener _listener;
         private Thread _acceptThread;
         private volatile bool _running;
+        private byte[] _tuningFrame;
+        private string _tuningJson;
 
         public int Port { get; private set; }
         public bool Running => _running;
@@ -69,7 +75,11 @@ namespace SDRSharp.IqTcpServer
                 try { sock.NoDelay = true; } catch {  }
 
                 var client = new Client(sock, QueueCapacity, OnClientClosed);
-                lock (_sync) _clients.Add(client);
+                lock (_sync)
+                {
+                    _clients.Add(client);
+                    if (_tuningFrame != null) client.Enqueue(_tuningFrame);
+                }
                 client.Start();
                 RaiseChanged();
             }
@@ -83,13 +93,48 @@ namespace SDRSharp.IqTcpServer
             if (removed) RaiseChanged();
         }
 
-        public void Broadcast(byte[] block)
+        public void PublishTuning(double centerHz, double vfoHz, double rate)
         {
+            if (!(rate > 0.0)) return;
+            string json = string.Format(CultureInfo.InvariantCulture,
+                "{{\"center\":{0:R},\"vfo\":{1:R},\"rate\":{2:R}}}", centerHz, vfoHz, rate);
+            lock (_sync)
+            {
+                if (json == _tuningJson) return;
+                _tuningJson = json;
+                _tuningFrame = MakeFrame(FrameTuning, Encoding.UTF8.GetBytes(json));
+                for (int i = 0; i < _clients.Count; i++)
+                    _clients[i].Enqueue(_tuningFrame);
+            }
+        }
+
+        public void Broadcast(byte[] iq)
+        {
+            if (iq == null || iq.Length == 0) return;
+            byte[] frame = null;
             lock (_sync)
             {
                 for (int i = 0; i < _clients.Count; i++)
-                    _clients[i].Enqueue(block);
+                {
+                    var c = _clients[i];
+                    if (!c.HasTuning) continue;
+                    if (frame == null) frame = MakeFrame(FrameIq, iq);
+                    c.Enqueue(frame);
+                }
             }
+        }
+
+        internal static byte[] MakeFrame(byte type, byte[] body)
+        {
+            var f = new byte[5 + body.Length];
+            f[0] = type;
+            uint n = (uint)body.Length;
+            f[1] = (byte)n;
+            f[2] = (byte)(n >> 8);
+            f[3] = (byte)(n >> 16);
+            f[4] = (byte)(n >> 24);
+            Buffer.BlockCopy(body, 0, f, 5, body.Length);
+            return f;
         }
 
         private void RaiseChanged()
@@ -102,49 +147,67 @@ namespace SDRSharp.IqTcpServer
         private sealed class Client
         {
             private readonly Socket _sock;
-            private readonly Channel<byte[]> _channel;
+            private readonly LinkedList<byte[]> _queue = new LinkedList<byte[]>();
+            private readonly int _capacity;
             private readonly Thread _sender;
             private readonly Action<Client> _onClosed;
             private volatile bool _alive = true;
+            private volatile bool _hasTuning;
 
             public Client(Socket sock, int capacity, Action<Client> onClosed)
             {
                 _sock = sock;
+                _capacity = capacity;
                 _onClosed = onClosed;
-                _channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(capacity)
-                {
-                    FullMode = BoundedChannelFullMode.DropOldest,
-                    SingleReader = true,
-                    SingleWriter = false,
-                });
                 _sender = new Thread(SendLoop) { IsBackground = true, Name = "IqTcp-Send" };
             }
 
+            public bool HasTuning => _hasTuning;
+
             public void Start() => _sender.Start();
 
-            public void Enqueue(byte[] block)
+            public void Enqueue(byte[] frame)
             {
-                if (_alive) _channel.Writer.TryWrite(block);
+                if (!_alive) return;
+                lock (_queue)
+                {
+                    if (frame[0] == FrameTuning) _hasTuning = true;
+                    while (_queue.Count >= _capacity)
+                    {
+                        var node = _queue.First;
+                        while (node != null && node.Value[0] != FrameIq) node = node.Next;
+                        if (node == null) break;
+                        _queue.Remove(node);
+                    }
+                    _queue.AddLast(frame);
+                    Monitor.Pulse(_queue);
+                }
+            }
+
+            private byte[] Dequeue()
+            {
+                lock (_queue)
+                {
+                    while (_alive && _queue.Count == 0) Monitor.Wait(_queue);
+                    if (!_alive) return null;
+                    var f = _queue.First.Value;
+                    _queue.RemoveFirst();
+                    return f;
+                }
             }
 
             private void SendLoop()
             {
-                var reader = _channel.Reader;
                 try
                 {
                     while (_alive)
                     {
-                        byte[] block;
-                        if (!reader.TryRead(out block))
-                        {
-                            if (!reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
-                                break;
-                            continue;
-                        }
+                        byte[] frame = Dequeue();
+                        if (frame == null) break;
                         int off = 0;
-                        while (off < block.Length)
+                        while (off < frame.Length)
                         {
-                            int sent = _sock.Send(block, off, block.Length - off, SocketFlags.None);
+                            int sent = _sock.Send(frame, off, frame.Length - off, SocketFlags.None);
                             if (sent <= 0) throw new SocketException((int)SocketError.ConnectionReset);
                             off += sent;
                         }
@@ -163,7 +226,7 @@ namespace SDRSharp.IqTcpServer
             {
                 if (!_alive) return;
                 _alive = false;
-                _channel.Writer.TryComplete();
+                lock (_queue) Monitor.PulseAll(_queue);
                 try { _sock.Shutdown(SocketShutdown.Both); } catch {  }
                 try { _sock.Close(); } catch {  }
             }

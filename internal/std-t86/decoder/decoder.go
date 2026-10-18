@@ -33,6 +33,12 @@ type SlotSample struct {
 	Slot []complex64
 }
 
+type BurstInfo struct {
+	Pos   int
+	SW    string
+	CType string
+}
+
 type FeedResult struct {
 	Control          []PositionedMessage
 	TCH              []*dsp.TchBurst
@@ -43,6 +49,7 @@ type FeedResult struct {
 	EVMs             []float64
 	SWCounts         map[string]int
 	Slots            []SlotSample
+	Bursts           []BurstInfo
 	SeedDetected *SeedInfo
 }
 
@@ -154,6 +161,7 @@ func (d *StreamingDecoder) handleBursts(bursts []dsp.DetectedBurst, res *FeedRes
 		res.Slots = append(res.Slots, SlotSample{b.EVM, b.Slot})
 
 		if b.SW == "S1" || b.SW == "S5" || b.SW == "S6" {
+			res.Bursts = append(res.Bursts, BurstInfo{Pos: b.Pos, SW: b.SW})
 			bits := dsp.SlotBits(b.Slot)
 			if len(bits) < control.CACOffset+control.CACSpan {
 				continue
@@ -173,6 +181,7 @@ func (d *StreamingDecoder) handleBursts(bursts []dsp.DetectedBurst, res *FeedRes
 		if burst == nil {
 			continue
 		}
+		res.Bursts = append(res.Bursts, BurstInfo{Pos: b.Pos, SW: b.SW, CType: burst.CType})
 		if burst.CType == "FACCH" && burst.CDist == 0 && d.Seed != SeedAuto {
 			msg, err := control.DecodeFACCH(burst.Bits, d.Seed)
 			if err == nil && (msg.CRCOK || control.KnownType(msg.Type)) {

@@ -5,7 +5,7 @@ namespace SDRSharp.IqTcpServer
 {
     internal sealed unsafe class IqDdc : IDisposable
     {
-        public const double MinOutputRate = 40_000.0;
+        public const double DefaultMinOutputRate = 40_000.0;
 
         private const int NormalizeInterval = 512;
 
@@ -15,6 +15,7 @@ namespace SDRSharp.IqTcpServer
         private bool _followVfo = true;
         private bool _decimate = true;
         private double _offsetHz;
+        private double _minOutputRate = DefaultMinOutputRate;
 
         private ComplexDecimator _decimator;
         private int _ratio = 1;
@@ -65,6 +66,20 @@ namespace SDRSharp.IqTcpServer
                 {
                     if (_decimate == value) return;
                     _decimate = value;
+                    Rebuild();
+                }
+            }
+        }
+
+        public double MinOutputRate
+        {
+            get { lock (_sync) return _minOutputRate; }
+            set
+            {
+                lock (_sync)
+                {
+                    if (value <= 0.0 || _minOutputRate == value) return;
+                    _minOutputRate = value;
                     Rebuild();
                 }
             }
@@ -204,7 +219,7 @@ namespace SDRSharp.IqTcpServer
                 _decimator = null;
             }
             _ratio = 1;
-            if (_followVfo && _decimate && _sampleRate >= 2.0 * MinOutputRate)
+            if (_followVfo && _decimate && _sampleRate >= 2.0 * _minOutputRate)
             {
                 for (int arg = 1; arg <= 8; arg++)
                 {
@@ -218,7 +233,7 @@ namespace SDRSharp.IqTcpServer
                         continue;
                     }
                     int ratio = candidate.DecimationRatio;
-                    if (ratio > _ratio && _sampleRate / ratio >= MinOutputRate)
+                    if (ratio > _ratio && _sampleRate / ratio >= _minOutputRate)
                     {
                         if (_decimator != null) _decimator.Dispose();
                         _decimator = candidate;

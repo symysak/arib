@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: >-
+  参考に何か作ったときは、どこかに書いてもらえるとうれしいです。
+  If you build something based on this, a credit like this would be appreciated:
+  "Based on symysak/arib — https://github.com/symysak/arib".
+title: arib
+abstract: >-
+  ARIB 標準規格のデジタル無線（市町村デジタル同報通信システムの STD-T86 / STD-T115、
+  都道府県・市町村デジタル移動通信システムの STD-T79 など）を SDR で受信して、ブラウザで見て聴くための受信デコーダ。
+  Receiver decoders for Japanese digital radio systems standardized by ARIB
+  (STD-T86 / STD-T115 municipal broadcast radio, STD-T79 prefectural/municipal digital mobile radio, and more),
+  with a live web monitor.
+type: software
+authors:
+  - alias: symysak
+repository-code: "https://github.com/symysak/arib"
+url: "https://github.com/symysak/arib"
+keywords:
+  - ARIB STD-T86
+  - ARIB STD-T115
+  - ARIB STD-T79
+  - SDR
+  - decoder

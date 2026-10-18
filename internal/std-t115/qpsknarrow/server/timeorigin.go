@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"github.com/symysak/arib/internal/rec"
 )
 
 
@@ -15,6 +17,9 @@ var (
 )
 
 func TimeOrigin(path string) (t0 time.Time, estimated bool) {
+	if n, ok := rec.Parse(path); ok && !n.Time.IsZero() {
+		return n.Time, false
+	}
 	base := filepath.Base(path)
 	loc := time.Local
 

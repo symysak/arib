@@ -13,7 +13,7 @@ namespace SDRSharp.IqTcpServer
         private readonly IqDdc _ddc = new IqDdc();
         private double _sampleRate;
 
-        public string DisplayName => "IQ TCP Server (cf32)";
+        public string DisplayName => "IQ TCP Server (sdrsharp://)";
         public bool HasGui => true;
         public UserControl Gui => _panel;
 
@@ -53,7 +53,24 @@ namespace SDRSharp.IqTcpServer
         {
             double offset = VfoOffsetHz;
             _ddc.OffsetHz = _ddc.FollowVfo ? offset : 0.0;
+            PublishTuning();
             return offset;
+        }
+
+        internal void PublishTuning()
+        {
+            double vfo, center;
+            if (_control == null) return;
+            try
+            {
+                vfo = (double)_control.Frequency;
+                center = _ddc.FollowVfo ? vfo : (double)_control.CenterFrequency;
+            }
+            catch
+            {
+                return;
+            }
+            _server.PublishTuning(center, vfo, _ddc.OutputSampleRate);
         }
 
 
@@ -66,6 +83,7 @@ namespace SDRSharp.IqTcpServer
             {
                 _sampleRate = value;
                 _ddc.SampleRate = value;
+                PublishTuning();
                 if (_panel != null) _panel.SetSampleRate(value);
             }
         }

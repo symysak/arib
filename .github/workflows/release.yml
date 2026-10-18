@@ -73,11 +73,20 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
 
+      # STD-T79（TYPE1）。純 Go。公開ツリーの std-t79 が鳴らすのは AMBE+ 4000/2400 だけ（ほかの符号器は private_*.go で、公開ツリーに無い）。
+      - name: std-t79 をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t79 ./cmd/std-t79
+
       - name: 生成物のアーキテクチャを確認
         run: |
-          file dist/std-t86 dist/std-t115-qpsknarrow build/g7221/g7221_sep_decode
+          file dist/std-t86 dist/std-t115-qpsknarrow dist/std-t79 build/g7221/g7221_sep_decode
           file dist/std-t86                 | grep -q '${{ matrix.expect }}'
           file dist/std-t115-qpsknarrow     | grep -q '${{ matrix.expect }}'
+          file dist/std-t79                 | grep -q '${{ matrix.expect }}'
           file build/g7221/g7221_sep_decode | grep -q '${{ matrix.expect }}'
           file build/g7221/g7221_sep_decode | grep -q 'statically linked'
 
@@ -88,6 +97,9 @@ jobs:
           # zip を展開したフォルダで実行すれば build/amrwbplus/ が実行ファイルの隣に出来る。
           bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t115-qpsknarrow \
             scripts/std-t115/build_amrwbplus.sh
+          # T79 の AMBE+ 4000/2400 は mbelib-neo（GPL）を使う。本体は同梱せず、取得してビルドするスクリプトだけを
+          # zip の直下へ（展開したフォルダで bash build_mbelib_neo.sh → build/mbelib-neo/ が実行ファイルの隣に出来る）。
+          bash .github/scripts/package.sh linux ${{ matrix.goarch }} dist/std-t79 scripts/std-t79/build_mbelib_neo.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -138,11 +150,19 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
 
+      - name: std-t79 をビルド
+        env:
+          CGO_ENABLED: "0"
+          GOOS: darwin
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t79 ./cmd/std-t79
+
       - name: 生成物のアーキテクチャを確認
         run: |
-          file dist/std-t86 dist/std-t115-qpsknarrow build/g7221/g7221_sep_decode
+          file dist/std-t86 dist/std-t115-qpsknarrow dist/std-t79 build/g7221/g7221_sep_decode
           test "$(lipo -archs dist/std-t86)" = '${{ matrix.arch }}'
           test "$(lipo -archs dist/std-t115-qpsknarrow)" = '${{ matrix.arch }}'
+          test "$(lipo -archs dist/std-t79)" = '${{ matrix.arch }}'
           test "$(lipo -archs build/g7221/g7221_sep_decode)" = '${{ matrix.arch }}'
 
       - name: zip を作る
@@ -150,6 +170,7 @@ jobs:
           bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t86 build/g7221
           bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t115-qpsknarrow \
             scripts/std-t115/build_amrwbplus.sh
+          bash .github/scripts/package.sh darwin ${{ matrix.goarch }} dist/std-t79 scripts/std-t79/build_mbelib_neo.sh
 
       - uses: actions/upload-artifact@v7
         with:
@@ -209,6 +230,14 @@ jobs:
           GOARCH: amd64
         run: go build -trimpath -ldflags "-s -w" -o dist/std-t115-qpsknarrow.exe ./cmd/std-t115/qpsknarrow
 
+      - name: std-t79 をビルド
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -trimpath -ldflags "-s -w" -o dist/std-t79.exe ./cmd/std-t79
+
       # SDR# の I/Q を TCP で流すプラグイン（contrib/sdrsharp-iq-tcp）。
       # 参照 DLL（SDRSharp.Common / SDRSharp.Radio）は build.ps1 が公式プラグイン SDK の
       # zip を取ってきて refs/ へ展開する。**外部の配布 URL に依存する**ので、ここが
@@ -226,7 +255,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $dll)) { throw "プラグイン DLL が出来ていない: $dll" }
           Get-Item $dll | Select-Object FullName, Length
 
-      # SDR# プラグインは規格に依存しない I/Q 供給側なので、両方の zip に入れる。
+      # SDR# プラグインは規格に依存しない I/Q 供給側なので、全部の zip に入れる。
       - name: zip を作る
         shell: pwsh
         run: |
@@ -237,6 +266,11 @@ jobs:
           # ダウンロード）で入れるところまでやるので、同梱するのはこの 1 本でよい。
           .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t115-qpsknarrow.exe `
             -ExtraFiles scripts\std-t115\build_amrwbplus.ps1 `
+            -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
+          # T79 の AMBE+（mbelib-neo、GPL）は本体を同梱せず、取得してビルドするスクリプトだけを zip の直下へ
+          # （build_mbelib_neo.ps1 も gcc が無ければ WinLibs を入れるところまでやる）。
+          .github/scripts/package.ps1 -Goos windows -Goarch amd64 -Binary dist/std-t79.exe `
+            -ExtraFiles scripts\std-t79\build_mbelib_neo.ps1 `
             -PluginDll contrib/sdrsharp-iq-tcp/bin/Release/net9.0-windows/SDRSharp.IqTcpServer.dll
 
       - uses: actions/upload-artifact@v7

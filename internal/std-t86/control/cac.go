@@ -3,7 +3,7 @@ package control
 import (
 	"fmt"
 
-	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/citycodes"
 	"github.com/symysak/arib/internal/std-t86/fec"
 )
 

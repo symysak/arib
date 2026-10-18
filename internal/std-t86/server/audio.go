@@ -3,16 +3,16 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/symysak/arib/internal/std-t86/citycodes"
+	"github.com/symysak/arib/internal/citycodes"
+	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/std-t86/decoder"
 	"github.com/symysak/arib/internal/std-t86/g7221"
 	"github.com/symysak/arib/internal/std-t86/scodec"
-	"github.com/symysak/arib/internal/std-t86/wavio"
+	"github.com/symysak/arib/internal/wavio"
 )
 
 
@@ -71,16 +71,21 @@ type audioMsg struct {
 	bits  []uint8
 	pos   int
 	cdist int
+	seed  int
+	base  string
 }
 
 type windowAudio struct {
-	pending  [][]uint8
-	gaps     *scodec.SlotGapTracker
-	conceal  *scodec.Concealer
-	pcm      []int16
-	wavPath  string
-	stats    audioStatus
-	staleCnt int
+	pending [][]uint8
+	gaps    *scodec.SlotGapTracker
+	conceal *scodec.Concealer
+	pcm     []int16
+	base    string
+	seed      int
+	seedKnown bool
+	wavPath   string
+	stats     audioStatus
+	staleCnt  int
 
 	batchQuality string
 	batchFrom    int
@@ -111,10 +116,10 @@ type audioWorker struct {
 	state  *liveState
 	emit   func(Event)
 	pcmSnk func(int, []int16)
-	logDir string
 
-	ch   chan audioMsg
-	done chan struct{}
+	ch       chan audioMsg
+	done     chan struct{}
+	stopOnce sync.Once
 
 	mu      sync.Mutex
 	windows map[int]*windowAudio
@@ -123,21 +128,13 @@ type audioWorker struct {
 }
 
 func newAudioWorker(seed int, state *liveState, emit func(Event),
-	pcmSink func(int, []int16), logDir string) *audioWorker {
-	dir := logDir
-	if dir != "" {
-		if abs, err := filepath.Abs(dir); err == nil {
-			dir = abs
-		}
-	}
+	pcmSink func(int, []int16)) *audioWorker {
 	return &audioWorker{
-		seed: seed, state: state, emit: emit, pcmSnk: pcmSink, logDir: dir,
+		seed: seed, state: state, emit: emit, pcmSnk: pcmSink,
 		ch: make(chan audioMsg, 1024), done: make(chan struct{}),
 		windows: map[int]*windowAudio{}, targets: map[int]*target{},
 	}
 }
-
-func (w *audioWorker) LogDir() string { return w.logDir }
 
 func (w *audioWorker) setSeed(seed int) {
 	w.seedMu.Lock()
@@ -154,16 +151,20 @@ func (w *audioWorker) currentSeed() int {
 func (w *audioWorker) start() { go w.run() }
 
 func (w *audioWorker) stop() {
-	close(w.ch)
+	w.stopOnce.Do(func() { close(w.ch) })
 	<-w.done
 }
 
 
-func (w *audioWorker) pushBurst(wid int, bits []uint8, pos, cdist int) {
-	w.send(audioMsg{kind: "burst", wid: wid, bits: bits, pos: pos, cdist: cdist})
+func (w *audioWorker) pushBurst(wid int, bits []uint8, pos, cdist, seed int) {
+	w.send(audioMsg{kind: "burst", wid: wid, bits: bits, pos: pos, cdist: cdist, seed: seed})
 }
 
 func (w *audioWorker) windowClosed(wid int) { w.send(audioMsg{kind: "close", wid: wid}) }
+
+func (w *audioWorker) setWindowBase(wid int, base string) {
+	w.send(audioMsg{kind: "base", wid: wid, base: base})
+}
 
 func (w *audioWorker) refreshSidecar(wid int) { w.send(audioMsg{kind: "sidecar", wid: wid}) }
 
@@ -200,6 +201,9 @@ func (w *audioWorker) run() {
 				wa.pending = append(wa.pending, nil)
 			}
 			wa.pending = append(wa.pending, m.bits)
+			if m.seed != decoder.SeedAuto {
+				wa.seed, wa.seedKnown = m.seed, true
+			}
 			wa.stats.cdistSum += m.cdist
 			if m.cdist > wa.stats.CDistMax {
 				wa.stats.CDistMax = m.cdist
@@ -212,6 +216,8 @@ func (w *audioWorker) run() {
 			}
 		case "close":
 			w.decodeBatch(m.wid, w.window(m.wid))
+		case "base":
+			w.window(m.wid).base = m.base
 		case "sidecar":
 			wa := w.window(m.wid)
 			if wa.wavPath != "" {
@@ -263,6 +269,9 @@ func (w *audioWorker) decodeBatch(wid int, wa *windowAudio) {
 
 	note := ""
 	seed := w.currentSeed()
+	if wa.seedKnown {
+		seed = wa.seed
+	}
 	if seed == decoder.SeedAuto {
 		note = "スクランブル値が未確定のため音声デコードを保留しました"
 	} else if err := w.decodeAndAppend(wid, wa, entries, seed); err != nil {
@@ -359,7 +368,7 @@ func (w *audioWorker) decodeAndAppend(wid int, wa *windowAudio,
 }
 
 func (w *audioWorker) writeWAV(wid int, wa *windowAudio) error {
-	if w.logDir == "" {
+	if wa.base == "" {
 		return nil
 	}
 	w.mu.Lock()
@@ -369,12 +378,7 @@ func (w *audioWorker) writeWAV(wid int, wa *windowAudio) error {
 		return nil
 	}
 	if wa.wavPath == "" {
-		w.mu.Lock()
-		part := targetFilenamePart(w.targets[wid])
-		w.mu.Unlock()
-		stamp := time.Now().Format("20060102-150405")
-		wa.wavPath = filepath.Join(w.logDir,
-			fmt.Sprintf("%s_broadcast%d%s.wav", stamp, wid, part))
+		wa.wavPath = rec.Path(wa.base, rec.Audio)
 		w.emit(newLogEvent(w.state.currentT(),
 			fmt.Sprintf("通報 #%d の音声を %s へ保存します", wid, wa.wavPath)))
 	}
@@ -476,7 +480,7 @@ func (w *audioWorker) writeSidecar(wid int, wa *windowAudio) error {
 			fmt.Fprintf(&b, "  注記: %s\n", iq.Note)
 		}
 	}
-	return os.WriteFile(wa.wavPath+".txt", []byte(b.String()), 0o644)
+	return os.WriteFile(rec.Path(wa.base, rec.AudioText), []byte(b.String()), 0o644)
 }
 
 func joinInts(v []int) string {

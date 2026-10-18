@@ -49,6 +49,13 @@ try {
 
     Copy-Item -LiteralPath 'readme.md' -Destination (Join-Path $Pkg 'readme.md')
 
+    foreach ($f in 'THIRD_PARTY_NOTICES.md') {
+        $src = $f
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { $src = Join-Path 'scripts\public_assets' $f }
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { throw "同梱するファイルが無い: $f" }
+        Copy-Item -LiteralPath $src -Destination (Join-Path $Pkg $f)
+    }
+
     if ($PluginDll) {
         if (-not (Test-Path -LiteralPath $PluginDll)) { throw "プラグイン DLL が無い: $PluginDll" }
         $pluginDir = Join-Path $Pkg 'sdrsharp-plugin'

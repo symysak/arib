@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>受信モニタ</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+<div class="linkbar" id="pane-link" data-title="受信モニタ" data-sub=""></div>
+
+<div class="grid">
+  <section class="card s12" id="pane-stations">
+    <h2>局一覧<span class="sub" id="stations-sub"></span></h2>
+    <div class="body" id="stations-body"></div>
+  </section>
+
+  <section class="card s6" id="pane-activity">
+    <h2>録音<span class="sub" id="activity-sub"></span></h2>
+    <div class="body" id="activity-body"></div>
+  </section>
+
+  <section class="card s6" id="pane-log">
+    <h2>ログ<span class="sub" id="log-sub"></span></h2>
+    <div id="log-toolbar" class="toolbar"></div>
+    <div class="body" id="log-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-settings">
+    <h2>設定<span class="sub" id="settings-sub"></span></h2>
+    <div class="body" id="settings-body"></div>
+  </section>
+</div>
+
+<footer class="credit"><a href="https://github.com/symysak/arib" target="_blank" rel="noopener">symysak/arib</a> · (c) 2026 symysak</footer>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

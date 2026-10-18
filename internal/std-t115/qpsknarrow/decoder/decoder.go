@@ -1,6 +1,7 @@
 package decoder
 
 import (
+	"github.com/symysak/arib/internal/bitpack"
 	"math"
 	"sort"
 
@@ -599,7 +600,7 @@ func (d *Decoder) decodeSC(fr []complex128, phase float64) Frame {
 		f.AMRSN = m.Header.AMRWBPlusSN
 	}
 	if f.TCHMessage != nil && isVoiceType(f.TCHMessage.Header.Type) {
-		f.Voice = packBits(info[fec.TCHHeaderBits:fec.TCHInfoBits])
+		f.Voice = bitpack.ToBytes(info[fec.TCHHeaderBits:fec.TCHInfoBits])
 	} else {
 		f.AMRSN = -1
 	}
@@ -615,15 +616,6 @@ func isVoiceType(t int) bool {
 	return false
 }
 
-func packBits(bits []uint8) []byte {
-	out := make([]byte, (len(bits)+7)/8)
-	for i, b := range bits {
-		if b&1 == 1 {
-			out[i/8] |= 1 << uint(7-i%8)
-		}
-	}
-	return out
-}
 
 func (d *Decoder) ProcessedSamples() int64 { return d.processed }
 
