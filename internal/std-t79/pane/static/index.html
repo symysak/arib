@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STD-T79 受信モニタ</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+
+<div class="linkbar" id="pane-link" data-title="ARIB STD-T79" data-sub="std-t79 live"></div>
+
+<div class="grid">
+  <section class="card s12" id="pane-stations">
+    <h2>局一覧<span class="sub" id="stations-sub"></span></h2>
+    <div class="body" id="stations-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-timeline">
+    <h2>帯タイムライン（スロット）<span class="sub" id="timeline-sub"></span></h2>
+    <div class="body" id="timeline-body"></div>
+  </section>
+
+  <section class="card s5" id="pane-carrier">
+    <h2>選択局の詳細<span class="sub" id="carrier-sub"></span></h2>
+    <div class="body" id="carrier-body"></div>
+  </section>
+
+  <section class="card s3" id="pane-signal">
+    <h2>コンスタレーション<span class="sub">π/4 シフト QPSK（差動）</span></h2>
+    <div class="body" id="signal-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-audio">
+    <h2>音声<span class="sub" id="audio-sub"></span></h2>
+    <div class="body" id="audio-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-quality">
+    <h2>品質トレンド<span class="sub" id="quality-sub"></span></h2>
+    <div class="body" id="quality-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-calls">
+    <h2>呼の流れ<span class="sub" id="calls-sub"></span></h2>
+    <div id="calls-toolbar" class="toolbar"></div>
+    <div class="body" id="calls-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-network">
+    <h2>網の情報（報知情報）<span class="sub" id="network-sub"></span></h2>
+    <div class="body" id="network-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-l1">
+    <h2>L1 インスペクタ（スロット）<span class="sub" id="l1-sub"></span></h2>
+    <div id="l1-toolbar" class="toolbar"></div>
+    <div class="body" id="l1-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-l2">
+    <h2>L2 インスペクタ（LAPDM）<span class="sub" id="l2-sub"></span></h2>
+    <div id="l2-toolbar" class="toolbar"></div>
+    <div class="body" id="l2-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-l3">
+    <h2>L3 インスペクタ（RT / MM / CC）<span class="sub" id="l3-sub"></span></h2>
+    <div id="l3-toolbar" class="toolbar"></div>
+    <div class="body" id="l3-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-system">
+    <h2>システム<span class="sub" id="system-sub"></span></h2>
+    <div class="body" id="system-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-activity">
+    <h2>録音（通話）<span class="sub" id="activity-sub"></span></h2>
+    <div class="body" id="activity-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-log">
+    <h2>ログ<span class="sub" id="log-sub"></span></h2>
+    <div id="log-toolbar" class="toolbar"></div>
+    <div class="body" id="log-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-settings">
+    <h2>設定<span class="sub" id="settings-sub"></span></h2>
+    <div class="body" id="settings-body"></div>
+  </section>
+</div>
+
+<footer class="credit"><a href="https://github.com/symysak/arib" target="_blank" rel="noopener">symysak/arib</a> · (c) 2026 symysak</footer>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

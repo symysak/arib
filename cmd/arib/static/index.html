@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>arib probe</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --sub: #5b6475; --line: #dde1e8; --ok: #1f7a3d; --ng: #9aa1ad; --hit: #fff6d6; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, sans-serif; }
+  header { display: flex; gap: 16px; align-items: baseline; padding: 10px 16px; background: var(--card); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  #verdict { font-weight: 600; }
+  #meta { color: var(--sub); font-size: 12px; }
+  main { padding: 12px 16px; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  th { color: var(--sub); font-weight: 500; font-size: 12px; }
+  tr.hit { background: var(--hit); }
+  td.ok { color: var(--ok); }
+  td.ng { color: var(--ng); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  iframe { width: 100%; height: calc(100vh - 260px); min-height: 480px; border: 1px solid var(--line); margin-top: 12px; background: var(--card); }
+  footer { color: var(--sub); font-size: 12px; padding: 8px 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>arib probe</h1>
+  <span id="verdict">判定中…</span>
+  <span id="meta"></span>
+</header>
+<main>
+  <table>
+    <thead><tr><th>規格・系統</th><th>物理層</th><th class="num">点数</th><th>当たりの証拠</th><th>系統の証拠</th><th>符号器</th><th class="num">音声 [s]</th><th>画面</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <iframe id="view" title="当たった規格の Web モニタ" allow="autoplay"></iframe>
+</main>
+<footer id="credit"></footer>
+<script type="module">
+const $ = (id) => document.getElementById(id);
+let shown = '';
+function cell(tr, text, cls) {
+  const td = document.createElement('td');
+  td.textContent = text;
+  if (cls) td.className = cls;
+  tr.appendChild(td);
+  return td;
+}
+function draw(s) {
+  const v = s.verdict || {};
+  $('verdict').textContent = v.name
+    ? `当たり: ${v.freq_mhz ? v.freq_mhz.toFixed(4) + ' MHz ' : ''}${v.family} / ${v.system}${v.codec ? '（' + v.codec + '）' : ''}`
+    : (s.finished ? 'どの規格にも当たらなかった' : '判定中…');
+  $('meta').textContent = `入力 ${s.input}${s.finished ? '（終端）' : ''}・切り替えの余裕 ${s.hold_sec} 秒${s.ledger ? '・台帳 ' + s.ledger : ''}`;
+  $('credit').textContent = s.generator || '';
+  const rows = $('rows');
+  rows.textContent = '';
+  for (const c of s.candidates) {
+    const tr = document.createElement('tr');
+    if (c.name === v.name) tr.className = 'hit';
+    cell(tr, c.label);
+    cell(tr, c.ok ? '当たり' : (c.done ? '終了' : '—'), c.ok ? 'ok' : 'ng');
+    cell(tr, c.score.toFixed(3), 'num');
+    cell(tr, c.lock || '');
+    cell(tr, c.plain ? '' : (c.evidence || '') + (c.evidence_ok ? ' ✓' : ''), c.evidence_ok ? 'ok' : '');
+    cell(tr, c.codec || '');
+    cell(tr, c.audio_sec.toFixed(1), 'num');
+    const a = document.createElement('a');
+    a.href = `std/${c.name}/`;
+    a.textContent = '開く';
+    a.target = '_blank';
+    cell(tr, '').appendChild(a);
+    rows.appendChild(tr);
+  }
+  if (v.name && v.name !== shown) {
+    shown = v.name;
+    $('view').src = `std/${v.name}/`;
+  }
+}
+async function tick() {
+  try {
+    const r = await fetch('api/probe', { cache: 'no-store' });
+    if (r.ok) draw(await r.json());
+  } catch (e) {
+    $('verdict').textContent = '接続が切れています';
+  }
+}
+tick();
+setInterval(tick, 250);
+</script>
+</body>
+</html>

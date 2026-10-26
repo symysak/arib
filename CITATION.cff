@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: >-
+  参考に何か作ったときは、どこかに書いてもらえるとうれしいです。
+  If you build something based on this, a credit like this would be appreciated:
+  "Based on symysak/arib — https://github.com/symysak/arib".
+title: arib
+abstract: >-
+  ARIB 標準規格のデジタル無線（STD-T86 / STD-T115 / STD-T79 / STD-T61）の受信側の実装。
+  規格書の記述を実際の電波で確かめるために作った。
+  A receiver-side implementation of ARIB digital radio standards (STD-T86 / STD-T115 / STD-T79 / STD-T61),
+  written to check the specifications against over-the-air signals.
+type: software
+authors:
+  - alias: symysak
+repository-code: "https://github.com/symysak/arib"
+url: "https://github.com/symysak/arib"
+keywords:
+  - ARIB STD-T86
+  - ARIB STD-T115
+  - ARIB STD-T79
+  - ARIB STD-T61
+  - software-defined radio
+  - digital demodulation
+  - protocol analysis
+  - reference implementation
