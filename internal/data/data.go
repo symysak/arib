@@ -39,6 +39,22 @@ type Position struct {
 	Heading float64 `json:"heading"`
 }
 
+type Wrapped struct {
+	Lat int64 `json:"lat"`
+	Lon int64 `json:"lon"`
+	Span int64 `json:"span"`
+	Unit float64 `json:"unit"`
+	OriginLat float64 `json:"origin_lat"`
+	OriginLon float64 `json:"origin_lon"`
+	Datum string `json:"datum"`
+	Group string `json:"group,omitempty"`
+}
+
+const (
+	DatumWGS84 = "wgs84"
+	DatumTokyo = "tokyo"
+)
+
 type Event struct {
 	Kind    Kind    `json:"kind"`
 	No      int64   `json:"no"`
@@ -47,7 +63,8 @@ type Event struct {
 	From string `json:"from,omitempty"`
 	Label string    `json:"label"`
 	Pos   *Position `json:"pos,omitempty"`
-	Rows  []Row     `json:"rows,omitempty"`
+	Wrap *Wrapped `json:"wrap,omitempty"`
+	Rows []Row    `json:"rows,omitempty"`
 	Raw []byte `json:"raw,omitempty"`
 }
 
