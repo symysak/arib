@@ -62,7 +62,7 @@ func SynthUp(frames, sps int, r *rand.Rand) SynthUpCarrier {
 			tch := randBits(r, l1.TCHBits)
 			if k == 6 || k == 7 {
 				l1.PlaceFACCH(tch, facchY, k == 7)
-				sw.Inverted = true
+				sw.Inverted = k == 6
 			} else {
 				c.Voice[string(tch)] = true
 				nv++

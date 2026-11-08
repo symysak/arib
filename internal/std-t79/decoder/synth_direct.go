@@ -60,7 +60,7 @@ func SynthDirect(frames, sps int, r *rand.Rand) SynthDirectCarrier {
 			sw := l1.DSW{OK: true, Mode: l1.ModeDirect, Voice: true, First: u == 0, N: map[bool]int{true: 9, false: 10}[u == 0]}
 			if k == 8 || k == 9 {
 				l1.PlaceFACCH(data, dy, k == 9)
-				sw.Ctl = true
+				sw.Ctl = k == 8
 			} else {
 				c.Voice[string(data)] = true
 			}

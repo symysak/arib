@@ -148,16 +148,14 @@ func (d *UpDecoder) directBurst(b dsp.Burst) (Slot, bool) {
 		s.PICH = &p
 		st.pichAt = -1
 	}
-	if got.Ctl {
-		if st.facchPrev != nil && st.facchFrm == st.frame-1 {
-			if r, ok := d.dacch(st, st.facchPrev, raw); ok {
-				d.Stats.FACCHOK++
-				s.FACCH = &r
-			}
+	if first := st.facch.step(st.frame, got.Ctl, raw); first != nil {
+		s.FACCHTail = !got.Ctl
+		if r, ok := d.dacch(st, first, raw); ok {
+			d.Stats.FACCHOK++
+			s.FACCH = &r
 		}
-		st.facchPrev, st.facchFrm = append(st.facchPrev[:0], raw...), st.frame
 	}
-	d.queueDirect(st, &s, pendTCH{frame: st.frame, t: t, raw: raw, facch: got.Ctl, voice: !got.Ctl && got.Voice})
+	d.queueDirect(st, &s, pendTCH{frame: st.frame, t: t, raw: raw, facch: got.Ctl || s.FACCHTail, voice: !got.Ctl && !s.FACCHTail && got.Voice})
 	s.Init, s.InitKnown = st.init, st.initKnown
 	return s, true
 }

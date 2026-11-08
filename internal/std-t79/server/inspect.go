@@ -200,7 +200,7 @@ func slotKind(s *decoder.Slot) string {
 		return "同期バースト"
 	case s.SW.Kind == l1.SWIdle:
 		return "空線"
-	case s.SW.Inverted:
+	case s.SW.Inverted || s.FACCHTail:
 		return "FACCH"
 	}
 	return "音声"

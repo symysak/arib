@@ -61,6 +61,7 @@ type Slot struct {
 	SACCH *l1.Unit
 	RCH   *l1.RCH
 	FACCH *l1.Unit
+	FACCHTail bool
 	TCH []TCHFrame
 	Init      int
 	InitKnown bool
@@ -85,8 +86,7 @@ type slotState struct {
 	failRun   int
 	sacch     [2][l1.SACCHSlots][]float32
 	sacchHave [2]uint8
-	facchPrev []float32
-	facchFrm  int64
+	facch     facchPair
 	rch0      []float32
 	rch0Frm   int64
 	pend      []pendTCH
@@ -285,7 +285,7 @@ func (d *Decoder) slot() (Slot, bool) {
 			for i := range d.slots {
 				d.slots[i].sf = -1
 				d.slots[i].resetCAC()
-				d.slots[i].facchPrev = nil
+				d.slots[i].facch.reset()
 				d.slots[i].sacchHave = [2]uint8{}
 			}
 		}
@@ -363,7 +363,7 @@ func (d *Decoder) slot() (Slot, bool) {
 		s.CAC = &u
 	default:
 		it.raw = d.traffic(st, &s, soft)
-		it.facch, it.voice = best.Inverted, !best.Inverted
+		it.facch, it.voice = best.Inverted || s.FACCHTail, !best.Inverted && !s.FACCHTail
 		if st.initKnown {
 			s.BI = busyIdle(l1.TrafficAt(l1.TrafficRaw(soft), st.init).BI)
 		}
@@ -463,6 +463,24 @@ func init() {
 	}
 }
 
+type facchPair struct {
+	first []float32
+	frm   int64
+}
+
+func (p *facchPair) step(frame int64, inverted bool, raw []float32) (first []float32) {
+	if p.first != nil && p.frm == frame-1 {
+		first = p.first
+	}
+	p.first = nil
+	if inverted {
+		p.first, p.frm = append([]float32(nil), raw...), frame
+	}
+	return first
+}
+
+func (p *facchPair) reset() { p.first = nil }
+
 func (d *Decoder) traffic(st *slotState, s *Slot, soft []float32) []float32 {
 	raw := l1.TrafficRaw(soft)
 	busy := s.SW.Kind == l1.SWNormal || s.SW.Kind == l1.SWSuper
@@ -483,14 +501,12 @@ func (d *Decoder) traffic(st *slotState, s *Slot, soft []float32) []float32 {
 			st.sacchHave[u] = 0
 		}
 	}
-	if s.SW.Inverted {
-		if st.facchPrev != nil && st.facchFrm == st.frame-1 {
-			if r, ok := d.facch(st, st.facchPrev, raw); ok {
-				d.Stats.FACCHOK++
-				s.FACCH = &r
-			}
+	if first := st.facch.step(st.frame, s.SW.Inverted, raw); first != nil {
+		s.FACCHTail = !s.SW.Inverted
+		if r, ok := d.facch(st, first, raw); ok {
+			d.Stats.FACCHOK++
+			s.FACCH = &r
 		}
-		st.facchPrev, st.facchFrm = append(st.facchPrev[:0], raw...), st.frame
 	}
 	if !busy {
 		return nil

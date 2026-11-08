@@ -224,7 +224,7 @@ func (d *UpDecoder) burst(b dsp.Burst) (Slot, bool) {
 		d.Stats.Traffic++
 		st.ccInit = l1.InitFromCC(cc)
 		raw := d.trafficUp(st, &s, soft)
-		it := pendTCH{frame: st.frame, t: t, raw: raw, facch: sw.Inverted, voice: !sw.Inverted}
+		it := pendTCH{frame: st.frame, t: t, raw: raw, facch: sw.Inverted || s.FACCHTail, voice: !sw.Inverted && !s.FACCHTail}
 		d.queueUp(st, &s, it)
 	}
 	s.SFPos = st.sf
@@ -308,14 +308,12 @@ func (d *UpDecoder) trafficUp(st *upSlot, s *Slot, soft []float32) []float32 {
 			st.sacchHave[u] = 0
 		}
 	}
-	if s.SW.Inverted {
-		if st.facchPrev != nil && st.facchFrm == st.frame-1 {
-			if r, ok := d.facchUp(st, st.facchPrev, raw); ok {
-				d.Stats.FACCHOK++
-				s.FACCH = &r
-			}
+	if first := st.facch.step(st.frame, s.SW.Inverted, raw); first != nil {
+		s.FACCHTail = !s.SW.Inverted
+		if r, ok := d.facchUp(st, first, raw); ok {
+			d.Stats.FACCHOK++
+			s.FACCH = &r
 		}
-		st.facchPrev, st.facchFrm = append(st.facchPrev[:0], raw...), st.frame
 	}
 	return append([]float32(nil), raw...)
 }

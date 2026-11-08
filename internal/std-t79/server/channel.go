@@ -363,7 +363,7 @@ func (c *Channel) handle(s *decoder.Slot, now float64) {
 		info.Kind, busy = "同期バースト", true
 	case s.SW.Kind == l1.SWIdle:
 		info.Kind = "空線"
-	case s.SW.Inverted:
+	case s.SW.Inverted || s.FACCHTail:
 		info.Kind, busy = "FACCH", true
 	default:
 		info.Kind, busy = "音声", true
@@ -374,7 +374,9 @@ func (c *Channel) handle(s *decoder.Slot, now float64) {
 	}
 	if d := s.Direct; d != nil {
 		info.SW = d.Name()
-		info.Kind = d.Kind(c.directOpt() != nil && c.directOpt().Control)
+		dk := *d
+		dk.Ctl = dk.Ctl || s.FACCHTail
+		info.Kind = dk.Kind(c.directOpt() != nil && c.directOpt().Control)
 		if s.DSB != nil && s.DSB.OK && s.DSB.BI == 0 {
 			busy = false
 		}
@@ -503,7 +505,7 @@ func (c *Channel) handle(s *decoder.Slot, now float64) {
 		cs.busyRun = 0
 	}
 	if cs.on {
-		cs.stats.observe(s, info.Kind == "音声" || (s.Direct != nil && !s.Direct.SB && !s.Direct.Ctl && s.Direct.Voice))
+		cs.stats.observe(s, info.Kind == "音声" || (s.Direct != nil && !s.Direct.SB && !s.Direct.Ctl && !s.FACCHTail && s.Direct.Voice))
 		if cs.stats.voice > 0 && cs.stats.voice%50 == 0 {
 			c.modeInfer(n)
 		}

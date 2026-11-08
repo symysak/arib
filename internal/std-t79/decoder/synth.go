@@ -87,7 +87,7 @@ func SynthWith(frames int, r *rand.Rand, voice func(k int) []uint8) SynthCarrier
 						tch[i] = uint8(r.Intn(2))
 					}
 					l1.PlaceFACCH(tch, facchY, f == SynthCallAt+3)
-					slot = l1.BuildTraffic(l1.SW{Kind: l1.SWNormal, N: 2, Inverted: true}, 0, SynthCC, tch, make([]uint8, 20), 1, init)
+					slot = l1.BuildTraffic(l1.SW{Kind: l1.SWNormal, N: 2, Inverted: f == SynthCallAt+2}, 0, SynthCC, tch, make([]uint8, 20), 1, init)
 				default:
 					tch := make([]uint8, 256)
 					if voice != nil {
