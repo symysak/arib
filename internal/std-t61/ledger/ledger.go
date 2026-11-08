@@ -177,12 +177,27 @@ func (l *Ledger) Observe(mhz float64, frames, richOK int, at time.Time) {
 	if n.richOK < minOK || n.richOK*100 < n.frames*minPct {
 		return
 	}
+	l.addLocked(k, mhz, at)
+}
+
+func (l *Ledger) addLocked(k int64, mhz float64, at time.Time) {
 	c := &Channel{MHz: snap(mhz), First: at, Last: at, WC: -1}
 	if p, ok := l.codecs[k]; ok {
 		c.Codec, c.WC = p.codec, p.wc
 		delete(l.codecs, k)
 	}
 	l.chans[k] = c
+}
+
+func (l *Ledger) Confirm(mhz float64, at time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	k := key(mhz)
+	if c := l.chans[k]; c != nil {
+		c.Last = at
+		return
+	}
+	l.addLocked(k, mhz, at)
 }
 
 func (l *Ledger) SetCodec(mhz float64, codec string, wc int) {

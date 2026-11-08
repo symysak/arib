@@ -173,18 +173,6 @@ func CRC6(data []uint8) uint8 {
 	return reg
 }
 
-func CRCLSB(data []uint8, feedback, init uint32, nbits int) uint32 {
-	mask := uint32(1)<<uint(nbits) - 1
-	reg := init & mask
-	for _, b := range data {
-		fb := (reg ^ uint32(b&1)) & 1
-		reg >>= 1
-		if fb == 1 {
-			reg ^= feedback & mask
-		}
-	}
-	return reg & mask
-}
 
 func CRC4(data []uint8, init uint8) uint8 {
 	reg := init & 0x0F

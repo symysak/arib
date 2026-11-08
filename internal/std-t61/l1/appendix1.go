@@ -89,9 +89,6 @@ type a1CRCVariant struct {
 }
 
 var a1CRCVariants = []a1CRCVariant{
-	{"相反の反転形",
-		func(d []uint8, init uint8) uint8 { return uint8(fec.CRCLSB(d, 12, uint32(init), 4)) },
-		func(d []uint8, init uint8) uint8 { return uint8(fec.CRCLSB(d, 131, uint32(init), 8)) }},
 	{"印字形", fec.CRC4, fec.CRC8},
 }
 

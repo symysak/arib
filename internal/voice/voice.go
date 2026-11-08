@@ -57,6 +57,8 @@ type Options map[string]string
 type Codec struct {
 	Name string
 	Desc string
+	Vocoder   string
+	Transport string
 	Ch Channel
 	Check string
 	Tentative bool

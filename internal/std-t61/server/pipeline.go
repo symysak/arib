@@ -46,8 +46,10 @@ type Config struct {
 	CodecOpt voice.Options
 	StationWC map[float64]int
 	TCHDump bool
+	AudioAGC bool
 	Headless bool
 	AudioTap func(idx int, pcm []int16, rate int)
+	DataFormat string
 	NoFollowAssign bool
 }
 
@@ -83,6 +85,7 @@ type Pipeline struct {
 	seq *callseq.Tracker
 	followed map[float64]bool
 	followAdd func(mhz float64) error
+	dataEvs map[string][]*DataEvent
 
 	out     func(Event)
 	started time.Time
@@ -101,6 +104,9 @@ type stationState struct {
 	forget bool
 	voice *voiceRun
 	callID int
+	prof profileState
+	a1 *a1Data
+	ctl *a1Ctl
 }
 
 func New(cfg Config) *Pipeline {
@@ -131,6 +137,7 @@ func (p *Pipeline) Snapshot() Snapshot {
 	if p.cfg.Ext != nil {
 		sn.Ext = p.cfg.Ext.Snapshot()
 	}
+	sn.Ext = p.dataSnapshot(sn.Ext)
 	sn.Recs = append(sn.Recs, p.recs...)
 	return sn
 }
@@ -281,6 +288,11 @@ func (p *Pipeline) Run(ctx context.Context, out func(Event)) error {
 	p.mu.Unlock()
 	err := eng.Run(ctx)
 	p.err = err
+	p.mu.Lock()
+	for _, s := range p.stations {
+		s.closeA1Data()
+	}
+	p.mu.Unlock()
 	p.saveLedger()
 	p.mu.Lock()
 	p.meta.Finished = true
@@ -367,6 +379,7 @@ func (p *Pipeline) addStation(mhz float64) *stationState {
 	idx := p.nextIdx
 	p.nextIdx++
 	s := &stationState{st: Station{Idx: idx, MHz: mhz, SFPos: -1, Watched: true, Ext: map[string]any{}}}
+	s.prof = newProfileState()
 	if p.led != nil {
 		s.st.Note = p.led.Note(mhz)
 	}
@@ -493,9 +506,12 @@ func (p *Pipeline) onFrame(s *stationState, f dec.Frame) {
 	if s.ext != nil {
 		s.ext.Frame(f)
 	}
+	s.prof.observe(f)
+	prof := p.profile(s)
 	sel := false
 	p.mu.Lock()
 	st := &s.st
+	st.Profile = prof
 	st.LastTSec = p.now()
 	st.Ledger = false
 	st.Synced = !f.Flywheel || st.Synced
@@ -613,6 +629,7 @@ func (p *Pipeline) onFrame(s *stationState, f dec.Frame) {
 		p.emit(Event{Type: "call", Call: sb})
 		p.addLogFor(sb.Idx, "call", "%.4f MHz 同期バースト %s %s", sb.MHz, sb.ID, sb.Text)
 	}
+	u := a1Res{U: p.onA1U(s, f), Ctl: p.onA1Ctl(s, f)}
 	if why := l1Why(f, richChanged, sb != nil); why != "" || (p.l1All && sel) {
 		if why == "" {
 			why = "全フレーム表示"
@@ -620,7 +637,7 @@ func (p *Pipeline) onFrame(s *stationState, f dec.Frame) {
 		p.storeL1(&L1Rec{Idx: idx, TSec: p.now(), MHz: st.MHz, Kind: st.Kind,
 			Uplink: f.Uplink, Flywheel: f.Flywheel, SFPos: f.SFPos, Why: why,
 			Info: l1Info(f), RICHOK: f.RICH.OK || (f.A1RICH != nil && f.A1RICH.OK), RICHBits: f.RICH.Bits17(),
-			Tree: buildL1Tree(f, l1.EditionFDMA, p.cfg.Ext), RawHex: hexOf(bitpack.ToBytes(f.Raw))})
+			Tree: buildL1Tree(f, l1.EditionFDMA, p.cfg.Ext, u), RawHex: hexOf(bitpack.ToBytes(f.Raw))})
 	}
 	for _, fr := range f.Frag {
 		if fr.Channel == "RCH" {

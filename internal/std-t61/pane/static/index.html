@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>STD-T61 受信モニタ</title>
 <link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./lib/leaflet/leaflet.css">
+<link rel="stylesheet" href="./data.css">
 </head>
 <body>
 
@@ -34,6 +36,16 @@
   <section class="card s4" id="pane-activity">
     <h2>録音<span class="sub" id="activity-sub"></span></h2>
     <div class="body" id="activity-body"></div>
+  </section>
+
+  <section class="card s8" id="pane-datamap">
+    <h2>位置<span class="sub" id="datamap-sub"></span></h2>
+    <div class="body" id="datamap-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-datamsg">
+    <h2>電文<span class="sub" id="datamsg-sub"></span></h2>
+    <div class="body" id="datamsg-body"></div>
   </section>
 
   <section class="card s12" id="pane-quality">
@@ -88,6 +100,7 @@
 
 <footer class="credit"><a href="https://github.com/symysak/arib" target="_blank" rel="noopener">symysak/arib</a> · (c) 2026 symysak</footer>
 
+<script src="./lib/leaflet/leaflet.js"></script>
 <script type="module" src="./main.js"></script>
 </body>
 </html>

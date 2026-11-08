@@ -130,6 +130,9 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	codecOpt := voice.Options{}
 	fs.Func("codec-opt", "名前で指定した符号器の設定 key=value（何度でも。例 mode=fr。鍵は符号器ごとに違う）", codecOpt.ParseOption)
 	var stationWC map[float64]int
+	audioAGC := fs.Bool("audio-agc", true, "復号した音声の音量を局ごとにそろえる（自動利得調整。送出レベルの低い局も聞こえるよう、ゲート −70 dBFS・最大 +42 dB。false で素のまま）")
+	dataFmt := fs.String("data", "auto", "第 1 編 付録 1 の U フレーム（非音声）の本体の書式（auto / off / "+server.DataFormats()+"）。auto は書式の検査で選ぶ。"+
+		"読めた位置・電文は画面の地図・電文のペインと <log-dir>/<系統>/data/ の日ごとの TSV へ。off で U を解かない")
 	tchDump := fs.Bool("tch-dump", false, "音声フレームの TCH 生ビットを録音の隣 <base>.tch.bin へ残す（番号は <base>.tch.idx。伝送路符号化が未知の系統では必須）")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, Usage(prog, "STD-T61 ライブ Web モニタ"))
@@ -161,10 +164,14 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	for _, n := range notes {
 		fmt.Fprintln(stderr, n)
 	}
+	if err := server.CheckDataFormat(*dataFmt); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 	if *codec == "off" || *codec == "auto" && len(voice.Codecs(t61voice.TCH, t61voice.TCH1)) == 0 {
 		*codec = ""
 	}
-	return f.Serve(ctx, server.Config{Source: plan.Source, Watch: cfg, Codec: *codec, CodecOpt: codecOpt, TCHDump: *tchDump, StationWC: stationWC}, stderr)
+	return f.Serve(ctx, server.Config{Source: plan.Source, Watch: cfg, Codec: *codec, CodecOpt: codecOpt, TCHDump: *tchDump, AudioAGC: *audioAGC, StationWC: stationWC, DataFormat: *dataFmt}, stderr)
 }
 
 func (f *Flags) Serve(ctx context.Context, sc server.Config, stderr io.Writer) int {

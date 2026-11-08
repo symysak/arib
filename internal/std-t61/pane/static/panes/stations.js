@@ -4,7 +4,16 @@ import { hms, wallShort } from '../time.js';
 import { el, setText, setClass, syncList } from '../dom.js';
 
 const f1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : '-');
-const COLS = ['周波数', '状態', '種別', 'モード', '通信種別', 'RICH 17ビット', 'RICH一致', '位相誤差', 'レベル', 'TA', '識別番号', '最終'];
+const COLS = ['周波数', '状態', '種別', '編', '実装', '音声符号化', '鍵（WC・スクランブル）', 'モード', '通信種別', 'RICH 17ビット', 'RICH一致', '位相誤差', 'レベル', 'TA', '識別番号', '最終'];
+
+function profileOf(st) {
+  const pr = st.profile || {};
+  const ext = st.ext || {};
+  const impl = [ext.impl, pr.impl].filter(Boolean).join('・');
+  const codec = pr.codec || ext.codec || '';
+  const keys = [...(pr.keys || []), ...(Array.isArray(ext.keys) ? ext.keys : [])];
+  return { edition: pr.edition || '', impl, codec, keys };
+}
 
 export function init(store) {
   const body = document.getElementById('stations-body');
@@ -41,6 +50,10 @@ export function init(store) {
     state.append(cells.dot, cells.stateText);
 
     add('kind', 'left');
+    add('edition', 'left');
+    add('impl', 'left tiny');
+    add('codec', 'left tiny');
+    add('keys', 'left tiny mono');
     const mode = add('mode', 'left');
     cells.modeTag = el('span', { class: 'tag idle' });
     mode.appendChild(cells.modeTag);
@@ -86,6 +99,14 @@ export function init(store) {
     setText(c.stateText, label);
     setClass(r.tr, [selected ? 'sel' : '', st.watched === false ? 'idle-row' : ''].filter(Boolean).join(' '));
     setText(c.kind, (st.kind || '-') + (st.uplink ? '(上り)' : ''));
+    const pf = profileOf(st);
+    setText(c.edition, pf.edition || '-');
+    setText(c.impl, pf.impl || '-');
+    setText(c.codec, pf.codec || '-');
+    const keys = pf.keys.map((k) => `${k.name}=${k.value}`);
+    setText(c.keys, keys.length ? keys.join(' / ') : '-');
+    const keyTitle = keys.join(' / ');
+    if (c.keys.title !== keyTitle) c.keys.title = keyTitle;
     const mode = st.mode || '-';
     setClass(c.modeTag, `tag ${mode === '音声' ? 'voice' : mode === 'FACCH' ? 'facch' : mode.startsWith('非音声') ? 'nv' : 'idle'}`);
     setText(c.modeTag, mode);

@@ -149,9 +149,10 @@ type Stats struct {
 	FACCHUnits, FACCHOK         int
 	SACCHFiller, RCHFiller, FACCHFiller int
 	NV2Units, NV2OK                     int
-	A1Frames, A1Voice  int
-	SBUnits, SBOK      int
-	SyncLoss           int
+	A1Frames, A1Voice int
+	SBUnits, SBOK     int
+	SyncLoss          int
+	Realign            int
 	SWCount            map[string]int
 	L2Frames, L2Errors int
 	L3Messages         int
@@ -476,6 +477,15 @@ func (d *Decoder) run() []Frame {
 			d.kindCand = nil
 		}
 		if sw == nil {
+			p, nsw, ready := d.realign()
+			if !ready {
+				return frames
+			}
+			if nsw != nil {
+				d.nextSW, d.lastSW, d.misses, d.kindCand = p, nsw, 0, nil
+				d.Stats.Realign++
+				continue
+			}
 			d.misses++
 			if d.misses > syncLossFrames {
 				d.locked = false
@@ -502,6 +512,33 @@ func (d *Decoder) run() []Frame {
 			d.base = start
 		}
 	}
+}
+
+const realignHalf = l1.FrameSymbols / 2
+
+func (d *Decoder) realign() (p int64, sw *l1.SyncWord, ready bool) {
+	off := d.swOffset()
+	if d.nextSW+realignHalf-off+l1.FrameSymbols+16 > d.base+int64(len(d.syms)) {
+		return 0, nil, false
+	}
+	for k := int64(1); k < realignHalf; k++ {
+		for _, q := range [2]int64{d.nextSW - k, d.nextSW + k} {
+			if q-off < d.base {
+				continue
+			}
+			w, e := l1.MatchSyncWord(d.hardBits(q, 32), 1)
+			if w == nil || e > 1 {
+				continue
+			}
+			if d.lastSW != nil && w.Uplink != d.lastSW.Uplink && e > 0 {
+				continue
+			}
+			if d.richOKAt(q) {
+				return q, w, true
+			}
+		}
+	}
+	return 0, nil, true
 }
 
 func (d *Decoder) decodeFrame(start int64, sw *l1.SyncWord, swErr int, fly bool) Frame {

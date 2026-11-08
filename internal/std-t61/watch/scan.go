@@ -166,9 +166,12 @@ const (
 	scanLockRatePct   = 8
 	scanLockMinFrames = 25
 	scanLockMinOK     = 3
+	scanLockFastOK      = 8
+	scanLockFastRatePct = 50
 )
 
 func scanLockedNow(frames, richOK int) bool {
-	return frames >= scanLockMinFrames && richOK >= scanLockMinOK &&
-		richOK*100 >= frames*scanLockRatePct
+	slow := frames >= scanLockMinFrames && richOK >= scanLockMinOK && richOK*100 >= frames*scanLockRatePct
+	fast := richOK >= scanLockFastOK && richOK*100 >= frames*scanLockFastRatePct
+	return slow || fast
 }

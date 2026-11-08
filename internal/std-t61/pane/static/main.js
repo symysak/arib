@@ -18,9 +18,11 @@ import * as system from "./panes/system.js";
 import * as log from "./panes/log.js";
 import * as settings from "./panes/settings.js";
 import * as audio from "./panes/audio.js";
+import * as datamap from "./panes/datamap.js";
+import * as datamsg from "./panes/datamsg.js";
 
 for (const pane of [link, stations, timeline, detail, signal, quality, recordings,
-  l1, l2, l3, calls, system, log, settings, audio]) {
+  l1, l2, l3, calls, system, log, settings, audio, datamap, datamsg]) {
   try { pane.init(store); } catch (e) { console.error("pane init", e); }
 }
 

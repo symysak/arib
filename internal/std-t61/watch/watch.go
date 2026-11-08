@@ -23,6 +23,7 @@ import (
 	"github.com/symysak/arib/internal/std-t61/l2"
 	"github.com/symysak/arib/internal/std-t61/l3"
 	"github.com/symysak/arib/internal/std-t61/pane"
+	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
 type Config struct {
@@ -226,9 +227,9 @@ type watcher struct {
 	procMS atomicInt
 	state atomic.Int32
 
-	recOn      bool
-	recStart   time.Time
-	recLast    time.Time
+	recOn bool
+	recStart   float64
+	recLast    float64
 	recReason  string
 	lastCtlRec time.Time
 
@@ -239,10 +240,11 @@ type watcher struct {
 	sbRun      int
 	ctlRun     int
 	callRun    int
-	events     int
-	lastFrame  time.Time
-	lostDone   bool
-	hook       *ChannelHook
+	a1u       *scpca1u292.Keyer
+	events    int
+	lastFrame time.Time
+	lostDone  bool
+	hook      *ChannelHook
 	idle *idleTCH
 	upBoard *atomic.Int32
 	upSeen  int32
@@ -307,8 +309,8 @@ func (w *watcher) Feed(iq []complex64) {
 		w.hook.Stats(w.d.Stats, w.d.CoarseHz(), w.d.CFOHz(), w.d.Locked())
 	}
 	if w.recOn {
-		now := time.Now()
-		if now.Sub(w.recLast).Seconds() > w.o.PostS || now.Sub(w.recStart).Seconds() > w.o.MaxS {
+		now := w.procSec()
+		if now-w.recLast > w.o.PostS || now-w.recStart > w.o.MaxS {
 			w.stopRec()
 		}
 	}
@@ -411,8 +413,8 @@ func (w *watcher) onFrame(f dec.Frame) {
 		if !w.recOn {
 			w.startRec(reason, f)
 		}
-		w.recLast = time.Now()
-		if reason == "制御チャネル" && time.Since(w.recStart).Seconds() > w.o.ControlS {
+		w.recLast = w.procSec()
+		if reason == "制御チャネル" && w.recLast-w.recStart > w.o.ControlS {
 			w.stopRec()
 			w.lastCtlRec = time.Now()
 		}
@@ -482,6 +484,8 @@ type loggedLine struct {
 	line string
 	at   time.Time
 }
+
+func (w *watcher) procSec() float64 { return float64(w.procMS.Load()) / 1000 }
 
 func (w *watcher) logGlobal(ch string, a l2.Address, sig *l3.Signal, line string) bool {
 	if !a.IsGlobal() {
@@ -582,7 +586,18 @@ func (w *watcher) a1Trigger(f dec.Frame) string {
 		w.lastState = state
 	}
 	w.sbRun, w.ctlRun = 0, 0
-	if r.OK && !r.IsIdleLine() && !f.Flywheel {
+	data := false
+	if r.OK && !r.IsVoice() && !r.IsIdleLine() {
+		if w.a1u == nil {
+			w.a1u = scpca1u292.NewKeyer(-1, -1)
+		}
+		for _, d := range w.a1u.Feed(scpca1u292.Item{TCH1: f.TCH1, Soft: f.TCH1Soft, Tag: f.Number}) {
+			if d.Tag == f.Number && d.OK {
+				data = true
+			}
+		}
+	}
+	if r.OK && !r.IsIdleLine() && !data && !f.Flywheel {
 		w.callRun++
 	} else if r.OK || f.Flywheel {
 		w.callRun = 0
@@ -637,7 +652,7 @@ func (w *watcher) startRec(reason string, f dec.Frame) {
 	if base == "" {
 		return
 	}
-	w.recOn, w.recStart, w.recLast, w.recReason = true, time.Now(), time.Now(), reason
+	w.recOn, w.recStart, w.recLast, w.recReason = true, w.procSec(), w.procSec(), reason
 	w.state.Store(int32(rx.StateActive))
 	w.sink.RecNote(0, fmt.Sprintf("周波数 %.4f MHz\n開始 %s\n理由 %s\nRICH %s %s\n入力レート %.0f Hz（DDC 後、std-t61 <file> -offset 0 で再デコード可）",
 		w.mhz, time.Now().Format(time.RFC3339), reason, f.RICH.Bits17(), f.RICH.Describe(w.d.Edition()), w.ddc.SampleRate()))

@@ -15,6 +15,7 @@ import (
 	"github.com/symysak/arib/internal/iqsrc"
 	dec "github.com/symysak/arib/internal/std-t61/decoder"
 	"github.com/symysak/arib/internal/std-t61/l1"
+	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
 func main() {
@@ -43,6 +44,7 @@ func cmdDecode(argv []string) int {
 	quiet := fs.Bool("quiet", false, "フレーム毎の行を出さず集計だけ表示")
 	all := fs.Bool("all", false, "同じ内容の連続フレームも畳まずに全行出す")
 	tchOut := fs.String("tch", "", "音声フレーム（RICH M=音声）の TCH ビットの書き出し先（1 フレーム 32 バイト、MSB 先頭で詰める）")
+	uwc := fs.Int("u-wc", -1, "第 1 編 付録 1 の U フレーム（u292 の伝送路）の鍵 = パターン番号 0〜511（-1 = 待受と CRC から当てる）")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `ARIB STD-T61 受信デコーダ（SCPC / FDMA 共通）
 
@@ -101,7 +103,7 @@ func cmdDecode(argv []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "入力: %s\n", src.Describe())
 	d := dec.New(dec.Config{SampleRate: rate, OffsetHz: *offset * 1000, Edition: ed, Scramble: *scramble})
-	pr := &printer{w: os.Stdout, quiet: *quiet, all: *all, t0: *startSec}
+	pr := &printer{w: os.Stdout, quiet: *quiet, all: *all, t0: *startSec, uk: scpca1u292.NewKeyer(*uwc, -1)}
 	chunk := int(rate * 0.1)
 	var total int64
 	limit := int64(*durSec * rate)
@@ -139,13 +141,15 @@ type printer struct {
 	lastLine  string
 	lastFirst dec.Frame
 	repeat    int
+	uk *scpca1u292.Keyer
 }
 
 func (p *printer) frame(d *dec.Decoder, f dec.Frame) {
+	u := p.uFrame(f)
 	if p.quiet {
 		return
 	}
-	body := describe(d, f)
+	body := describe(d, f) + u
 	if !p.all && body == p.lastLine {
 		p.repeat++
 		return
@@ -165,6 +169,25 @@ func (p *printer) flush() {
 	}
 	fmt.Fprintf(p.w, "%9.3fs #%-5d %s%s\n", p.t0+f.TimeSec, f.Number, p.lastLine, rep)
 	p.repeat = 0
+}
+
+func (p *printer) uFrame(f dec.Frame) string {
+	r := f.A1RICH
+	if r == nil || !r.OK || r.IsVoice() || len(f.TCH1) != scpca1u292.Bits {
+		return ""
+	}
+	ds := p.uk.Feed(scpca1u292.Item{TCH1: f.TCH1, Soft: f.TCH1Soft})
+	if len(ds) == 0 {
+		return ""
+	}
+	x := ds[len(ds)-1].Result
+	switch {
+	case !x.OK:
+		return fmt.Sprintf(" | U[NG e=%d wc=%d]", x.Corrected, x.WC)
+	case x.IsIdle():
+		return fmt.Sprintf(" | U[OK e=%d wc=%d 待受]", x.Corrected, x.WC)
+	}
+	return fmt.Sprintf(" | U[OK e=%d wc=%d] %X", x.Corrected, x.WC, bitpack.ToBytes(x.Body))
 }
 
 func describe(d *dec.Decoder, f dec.Frame) string {
@@ -286,7 +309,7 @@ func b2i(b bool) int {
 func printSummary(d *dec.Decoder, rate float64, total int64) {
 	s := d.Stats
 	fmt.Printf("\n== 集計 ==\n")
-	fmt.Printf("処理 %.1f 秒  編=%s  粗捕捉 %+.0f Hz  残留CFO %+.0f Hz  同期外れ %d 回\n", float64(total)/rate, d.Edition(), d.CoarseHz(), d.CFOHz(), s.SyncLoss)
+	fmt.Printf("処理 %.1f 秒  編=%s  粗捕捉 %+.0f Hz  残留CFO %+.0f Hz  同期外れ %d 回  区切りの移し直し %d 回\n", float64(total)/rate, d.Edition(), d.CoarseHz(), d.CFOHz(), s.SyncLoss, s.Realign)
 	fmt.Printf("フレーム %d（同期ワード検出 %d / 慣性 %d）  RICH CRC OK %d\n", s.Frames, s.SWDetected, s.Flywheel, s.RICHOK)
 	names := make([]string, 0, len(s.SWCount))
 	for k := range s.SWCount {

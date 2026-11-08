@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	dec "github.com/symysak/arib/internal/std-t61/decoder"
 	t61voice "github.com/symysak/arib/internal/std-t61/voice"
 	"github.com/symysak/arib/internal/voice"
+	"github.com/symysak/arib/internal/voice/agc"
 	"github.com/symysak/arib/internal/wavio"
 )
 
@@ -39,8 +41,14 @@ type voiceRun struct {
 	pend  []pendFrame
 	curT float64
 	tNow atomic.Uint64
+	lastName string
+	lastWC   int
+	dataWC int
 	skipStart bool
+	trial *codecTrial
+	spare []*codecScore
 	up upGate
+	level *agc.AGC
 	setUpScramble func(init int)
 
 	mu  sync.Mutex
@@ -74,6 +82,14 @@ type pendFrame struct {
 	f       voice.Frame
 	isVoice bool
 }
+
+type codecTrial struct {
+	name  string
+	n, ok int
+	frames int
+}
+
+const codecTrialFrames = 2 * codecMinChecks
 
 func codecByName(name string) (voice.Codec, bool) {
 	for _, c := range voice.Codecs(t61voice.TCH, t61voice.TCH1) {
@@ -124,7 +140,7 @@ func CheckCodecOptions(name string, opt voice.Options) (notes []string, err erro
 }
 
 func newVoiceRun(p *Pipeline, s *stationState) *voiceRun {
-	r := &voiceRun{p: p, s: s, idx: s.st.Idx, mhz: s.st.MHz, pre: p.cfg.Watch.PreS}
+	r := &voiceRun{p: p, s: s, idx: s.st.Idx, mhz: s.st.MHz, pre: p.cfg.Watch.PreS, dataWC: -1}
 	r.ringN = int(r.pre * voice.SampleRate)
 	if p.cfg.TCHDump && (p.cfg.Codec == "" || p.cfg.Codec == "auto") {
 		r.tr = r.newTracker(nil, "")
@@ -151,7 +167,55 @@ func newVoiceRun(p *Pipeline, s *stationState) *voiceRun {
 			r.cands = append(r.cands, &codecScore{c: c, v: v})
 		}
 	}
+	r.startFromLedger()
 	return r
+}
+
+func (r *voiceRun) startFromLedger() {
+	if r.p.led == nil || len(r.cands) == 0 {
+		return
+	}
+	name, _ := r.p.led.Codec(r.mhz)
+	if name == "" {
+		return
+	}
+	c, ok := codecByName(name)
+	if !ok || c.Tentative || (c.Ch != t61voice.TCH && c.Ch != t61voice.TCH1) || (c.Available != nil && !c.Available()) {
+		return
+	}
+	spare := r.cands
+	r.cands = nil
+	r.start(&c, c.Name, "台帳の符号器。検査で確かめる")
+	r.trial, r.spare = &codecTrial{name: c.Name}, spare
+}
+
+func (r *voiceRun) checkTrial() {
+	t := r.trial
+	if t == nil || (t.n < codecMinChecks && t.frames < codecTrialFrames) {
+		return
+	}
+	r.trial = nil
+	if t.n >= codecMinChecks && float64(t.ok) >= codecMinRatio*float64(t.n) {
+		for _, s := range r.spare {
+			s.v.Close()
+		}
+		r.spare, r.pend = nil, nil
+		r.p.addLogFor(r.idx, "call", "台帳の符号器 %s を確かめた（検査 %d/%d）", t.name, t.ok, t.n)
+		return
+	}
+	text := fmt.Sprintf("台帳の符号器 %s は検査が通らない（%d/%d）ので選び直す", t.name, t.ok, t.n)
+	r.p.addLogFor(r.idx, "call", "%s", text)
+	r.p.notice("%.4f MHz %s", r.mhz, text)
+	r.event(r.curT, "voice_note", text)
+	old := r.tr
+	r.chosen, r.cands, r.spare = nil, r.spare, nil
+	r.tr = nil
+	if r.p.cfg.TCHDump {
+		r.tr = r.newTracker(nil, "")
+	}
+	if old != nil {
+		old.Finish()
+	}
 }
 
 func (r *voiceRun) codecOpts(c voice.Codec, base voice.Options) voice.Options {
@@ -165,17 +229,42 @@ func (r *voiceRun) codecOpts(c voice.Codec, base voice.Options) voice.Options {
 		} else if _, fixed := o["wc"]; !fixed {
 			if h := r.ledgerHint(); h != "" {
 				o["hint"] = h
+			} else if r.dataWC >= 0 {
+				o["hint"] = fmt.Sprintf("%s:%d", c.Name, r.dataWC)
 			}
 		}
 	}
 	return o
 }
 
-func (r *voiceRun) ledgerHint() string {
-	if r.p.led == nil {
-		return ""
+func (r *voiceRun) setDataWC(wc int) {
+	if wc == r.dataWC {
+		return
 	}
-	name, wc := r.p.led.Codec(r.mhz)
+	r.dataWC = wc
+	if r.chosen != nil {
+		return
+	}
+	for _, s := range r.cands {
+		if s.c.Ch != t61voice.TCH1 {
+			continue
+		}
+		v, err := s.c.New(r.codecOpts(s.c, nil))
+		if err != nil {
+			continue
+		}
+		s.v.Close()
+		s.v, s.n, s.ok = v, 0, 0
+	}
+}
+
+func (r *voiceRun) ledgerHint() string {
+	name, wc := r.lastName, r.lastWC
+	if r.p.led != nil {
+		if n, w := r.p.led.Codec(r.mhz); n != "" && w >= 0 {
+			name, wc = n, w
+		}
+	}
 	if name == "" || wc < 0 {
 		return ""
 	}
@@ -186,8 +275,12 @@ func (r *voiceRun) ledgerHint() string {
 }
 
 func (r *voiceRun) recordChoice(name string, wc int) {
+	if wc >= 0 && name != "" {
+		r.lastName, r.lastWC = name, wc
+	}
 	if r.p.led != nil && name != "" {
 		r.p.led.SetCodec(r.mhz, name, wc)
+		r.p.led.Confirm(r.mhz, time.Now())
 	}
 }
 
@@ -205,6 +298,9 @@ func (r *voiceRun) start(codec *voice.Codec, name, why string) {
 	r.p.mu.Unlock()
 	if codec != nil && codec.Ch == t61voice.TCH {
 		r.recordChoice(codec.Name, -1)
+	}
+	if codec != nil && codec.Ch == t61voice.TCH1 && r.lastName == codec.Name && r.lastWC >= 0 {
+		r.recordChoice(codec.Name, r.lastWC)
 	}
 	r.p.addLogFor(r.idx, "call", "音声の符号器: %s（%s）", name, why)
 	if r.p.cfg.Codec == "auto" {
@@ -238,9 +334,15 @@ func (r *voiceRun) newTracker(codec *voice.Codec, name string) *voice.Tracker {
 		if cc.Tentative {
 			tentative = " 未確定（伝送路が候補のひとつ）"
 		}
-		opt := r.codecOpts(cc, r.p.cfg.CodecOpt)
-		tr.NewCodec = func() (voice.Voice, error) { return cc.New(opt) }
+		tr.NewCodec = func() (voice.Voice, error) { return cc.New(r.codecOpts(cc, r.p.cfg.CodecOpt)) }
 		tr.Sink = r.sink
+		if r.p.cfg.AudioAGC {
+			if r.level == nil {
+				r.level = agc.NewQuiet()
+			}
+			tr.Filter = r.level.Process
+			tr.OnOnset = r.level.MarkOnset
+		}
 	}
 	tr.OnStart = func(voice.Frame) {
 		if r.tr == tr && r.skipStart {
@@ -261,6 +363,12 @@ func (r *voiceRun) newTracker(codec *voice.Codec, name string) *voice.Tracker {
 	}
 	notes := map[string]bool{}
 	tr.OnUnit = func(u voice.Unit, _, _ int64) {
+		if r.tr == tr && r.trial != nil && u.Check.Valid {
+			r.trial.n++
+			if u.Check.OK {
+				r.trial.ok++
+			}
+		}
 		if r.tr == tr && u.Note != "" && !notes[u.Note] {
 			notes[u.Note] = true
 			r.event(r.curT, "voice_note", u.Note)
@@ -282,7 +390,7 @@ func (r *voiceRun) frame(f dec.Frame) {
 	vf := voice.Frame{Ch: t61voice.TCH, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH, Soft: f.TCHSoft}
 	if f.A1RICH != nil {
 		isVoice = f.A1RICH.IsVoice() && len(f.TCH1) == 292
-		vf = voice.Frame{Ch: t61voice.TCH1, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH1, Soft: f.TCH1Soft}
+		vf = voice.Frame{Ch: t61voice.TCH1, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH1, Soft: f.TCH1Soft, Sub: int(f.A1RICH.FN)}
 	}
 	r.tNow.Store(math.Float64bits(f.TimeSec))
 	if f.Uplink && f.A1RICH == nil && r.upFrame(f, vf, isVoice) {
@@ -298,6 +406,17 @@ func (r *voiceRun) deliver(f dec.Frame, vf voice.Frame, isVoice bool) {
 	if r.tr != nil {
 		r.curT = f.TimeSec
 		r.tr.Push(vf, isVoice)
+		if r.trial != nil {
+			if isVoice {
+				r.trial.frames++
+			}
+			r.pend = append(r.pend, pendFrame{vf, isVoice})
+			if len(r.pend) > codecPending {
+				r.pend = r.pend[len(r.pend)-codecPending:]
+			}
+			r.checkTrial()
+			return
+		}
 		if r.chosen != nil || r.cands == nil {
 			return
 		}
@@ -328,6 +447,11 @@ func (r *voiceRun) deliver(f dec.Frame, vf voice.Frame, isVoice bool) {
 		u, ok, err := s.v.Transport(vf)
 		if err != nil || !ok || !u.Check.Valid {
 			continue
+		}
+		if u.Choice != nil {
+			if wc, err := strconv.Atoi(u.Choice.Opts["wc"]); err == nil && s.c.Name == u.Choice.Codec {
+				r.lastName, r.lastWC = u.Choice.Codec, wc
+			}
 		}
 		s.n++
 		if u.Check.OK {
@@ -487,7 +611,7 @@ func (r *voiceRun) finish() {
 	}
 	r.finished = true
 	r.flushUp()
-	for _, s := range r.cands {
+	for _, s := range append(r.cands, r.spare...) {
 		s.v.Close()
 	}
 	if r.tr != nil {

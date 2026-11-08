@@ -7,6 +7,8 @@ import (
 	dec "github.com/symysak/arib/internal/std-t61/decoder"
 	"github.com/symysak/arib/internal/std-t61/l1"
 	"github.com/symysak/arib/internal/std-t61/l2"
+	scpca1f40 "github.com/symysak/arib/internal/std-t61/scpc-a1f40"
+	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
 
@@ -84,9 +86,9 @@ func rowsToNodes(rows []l1.Row) []Node {
 	return out
 }
 
-func buildL1Tree(f dec.Frame, ed l1.Edition, ext Extension) []Node {
+func buildL1Tree(f dec.Frame, ed l1.Edition, ext Extension, a a1Res) []Node {
 	if f.A1RICH != nil {
-		return buildA1Tree(f)
+		return buildA1Tree(f, a)
 	}
 	phys := Node{Label: "物理層", Value: "384 ビット / 40 ms"}
 	sw := "慣性（同期ワード未検出）"
@@ -250,7 +252,8 @@ func buildL2Tree(fr l2.Frame, ext Extension) []Node {
 	return []Node{{Label: "LAPDM", Value: val, Note: note, Children: kids}}
 }
 
-func buildA1Tree(f dec.Frame) []Node {
+func buildA1Tree(f dec.Frame, a a1Res) []Node {
+	u := a.U
 	phys := Node{Label: "物理層", Value: "第 1 編 付録 1・384 ビット / 40 ms"}
 	sw := "慣性（同期ワード未検出）"
 	if !f.Flywheel && f.SW != nil {
@@ -268,6 +271,25 @@ func buildA1Tree(f dec.Frame) []Node {
 	tch := Node{Label: "TCH1", Value: fmt.Sprintf("%d ビット", len(f.TCH1)),
 		Range: rangeOf(l1.A1DataStart+l1.A1RICHBits, l1.A1DataStart+l1.A1RICHBits+l1.A1TCH1Bits),
 		Note:  "スクランブル（PN(9,5)、パターン番号は規格が規定しない）を掛けたまま。中身の組立は規格が規定しない"}
+	if u != nil {
+		v := "CRC 不一致"
+		switch {
+		case u.IsIdle():
+			v = "待受（本体が全部 0）"
+		case u.OK:
+			v = uBody(u)
+		}
+		tch.Children = append(tch.Children, Node{Label: "本体 174 ビット", Value: v,
+			Note: fmt.Sprintf("伝送路 %s（wc=%d → 18×17 → K=5 率 2/3 → CRC-16/GENIBUS）。訂正 %d ビット", scpca1u292.Name, u.WC, u.Corrected)})
+	}
+	if c := a.Ctl; c != nil {
+		v := "CRC 不一致（鍵がまだ決まらないか壊れた枚）"
+		if c.OK {
+			v = fmt.Sprintf("%X", c.Data[:])
+		}
+		tch.Children = append(tch.Children, Node{Label: "制御語（FN1 の区画 0）", Value: v, Range: rangeOf(l1.A1DataStart+l1.A1RICHBits, l1.A1DataStart+l1.A1RICHBits+92),
+			Note: fmt.Sprintf("伝送路 %s（2 ビット × 8 列 → K=7 → 情報 40 に wc=%d のマスク → データ 32 + CRC-8）。訂正 %d ビット", scpca1f40.ControlName, c.WC, c.Errors)})
+	}
 	phys.Children = append(phys.Children, rich, tch)
 	return []Node{phys}
 }

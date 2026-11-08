@@ -101,6 +101,8 @@ type Station struct {
 	Recording bool   `json:"recording"`
 	RecBase   string `json:"rec_base"`
 
+	Profile Profile `json:"profile"`
+
 	TA   int    `json:"ta"`
 	SSC  int    `json:"ssc"`
 	SBID string `json:"sb_id"`
