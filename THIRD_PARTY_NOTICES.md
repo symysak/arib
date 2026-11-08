@@ -79,11 +79,11 @@ C ソースとテストベクタで、加工せずに置いてある。`std-t86`
 同梱しない。`build_amrwbplus.sh` / `build_amrwbplus.ps1` が 3GPP から取得してビルドする。
 取得したものは 3GPP の条件に従う。
 
-### mbelib-neo（symysak/mbelib-neo。soltia48/mbelib-neo のフォーク）
+### ambe2-c（symysak/ambe2-c。復号部は blip25-vocoder の派生）
 
-`std-t79`・`arib` の音声（AMBE+ 4000/2400）に使う。GPL-2.0-or-later。同梱しない（実行ファイルにも
-組み込まない。子プロセスとして呼ぶ）。`build_mbelib_neo.sh`（Windows は `build_mbelib_neo.ps1`）が GitHub から取得してビルドする。取得したものは
-GPL の条件に従う。音声の表は近似（mbelib-neo 自身がそう明記している）。
+`std-t79`・`std-t61`・`std-t102`・`arib` の音声（AMBE+ 4000/2400・AMBE+ 2000・AMBE+2 3600x2450）に使う。MIT。同梱しない（実行ファイルにも
+組み込まない。子プロセスとして呼ぶ）。`build_ambe2c.sh`（Windows は `build_ambe2c.ps1`）が GitHub から取得してビルドする。取得したものは
+その条件に従う（AMBE+2 には特許の注記がある）。
 
 ### SDR#
 
@@ -98,3 +98,37 @@ GPL の条件に従う。音声の表は近似（mbelib-neo 自身がそう明�
 （https://www.e-stat.go.jp/municipalities/cities/areacode ）および「廃置分合等情報」
 （https://www.e-stat.go.jp/municipalities/cities/absorption-separation-of-municipalities ）
 を加工して作成。
+
+### Leaflet 1.9.4
+
+Web モニタの地図（`internal/webui/static/lib/leaflet`。画面に同梱して配る）。BSD 2-Clause License。
+地図のタイルは国土地理院の地理院タイル（画面に出典を表示する）。
+
+```
+BSD 2-Clause License
+
+Copyright (c) 2010-2023, Volodymyr Agafonkin
+Copyright (c) 2010-2011, CloudMade
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```

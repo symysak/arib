@@ -20,9 +20,10 @@ ARIB 標準規格のデジタル無線の受信処理を実装した検証用・
 | STD-T86 | 市町村デジタル同報通信システム（60MHz 帯、16QAM） | `std-t86` | G.722.1（同梱） |
 | STD-T115 QPSK ナロー方式 | 市町村デジタル同報通信システム（60MHz 帯、QPSK） | `std-t115-qpsknarrow` | AMR-WB+ |
 | STD-T79 TYPE1 | 都道府県・市町村デジタル移動通信システム（260MHz 帯） | `std-t79` | AMBE+ 4000/2400 の網だけ |
-| STD-T61 SCPC/FDMA | 狭帯域デジタル通信方式 | `std-t61` | なし（レイヤ 1〜3 まで） |
+| STD-T61 SCPC/FDMA | 狭帯域デジタル通信方式 | `std-t61` | 第 1 編 付録 1 の AMBE+ 2000・AMBE+2 3600x2450 の網と、FDMA 編の TCH から位置を指定して取り出す AMBE+2。ほかの網はレイヤ 1〜3 まで |
+| STD-T102 第 2 編 | 狭帯域デジタル通信方式（SCPC/4 値 FSK）と、その上の STD-B54 | `std-t102` | AMBE+2 3600x2450 |
 
-`arib` は全部入り。`arib live --std t86|t115-qpsknarrow|t79|t61 …` は各バイナリの `live` と同じで、
+`arib` は全部入り。`arib live --std t86|t115-qpsknarrow|t79|t61|t102 …` は各バイナリの `live` と同じで、
 `arib probe` は 1 局を全部の規格で同時に試して、どれかを判定する。
 
 ## 入手
@@ -32,18 +33,19 @@ ARIB 標準規格のデジタル無線の受信処理を実装した検証用・
 `build/` は実行ファイルの隣に置いたままにする（音声復号器をそこから探す）。
 AMR-WB+ は再頒布できないので、zip の中の `build_amrwbplus.sh` / `.ps1` でビルドする。
 
-`std-t79`・`std-t61`・`arib` は配っていない。ソースからビルドする（Go、C コンパイラ、git が要る）。
+`std-t79`・`std-t61`・`std-t102`・`arib` は配っていない。ソースからビルドする（Go、C コンパイラ、git が要る）。
 
 ```sh
 go build -o std-t86             ./cmd/std-t86
 go build -o std-t115-qpsknarrow ./cmd/std-t115/qpsknarrow
 go build -o std-t79             ./cmd/std-t79
 go build -o std-t61             ./cmd/std-t61
+go build -o std-t102            ./cmd/std-t102
 go build -o arib                ./cmd/arib
 
 bash scripts/std-t86/build_g7221.sh        # G.722.1
 bash scripts/std-t115/build_amrwbplus.sh   # AMR-WB+
-bash scripts/std-t79/build_mbelib_neo.sh   # AMBE+ 4000/2400（mbelib-neo）
+bash scripts/std-t61/build_ambe2c.sh       # AMBE+ 4000/2400・AMBE+ 2000・AMBE+2（ambe2-c。std-t79・std-t61・std-t102・arib）
 ```
 
 Windows は同じ名前の `.ps1`。

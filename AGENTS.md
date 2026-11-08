@@ -29,9 +29,10 @@ See `LEGAL.md`. Do not add features that publish or share received content, keep
 go build ./cmd/std-t86
 go build ./cmd/std-t115/qpsknarrow
 go build ./cmd/std-t79
-go build ./cmd/std-t61   # no audio decoding
+go build ./cmd/std-t61
+go build ./cmd/std-t102
 go build ./cmd/arib      # all-in-one: `arib live --std <standard>` and `arib probe` (tries every standard at once)
 bash scripts/std-t86/build_g7221.sh        # audio decoder for std-t86 (G.722.1)
 bash scripts/std-t115/build_amrwbplus.sh   # audio decoder for std-t115-qpsknarrow (AMR-WB+)
-bash scripts/std-t79/build_mbelib_neo.sh   # audio decoder for std-t79 (AMBE+ 4000/2400, mbelib-neo; Windows: build_mbelib_neo.ps1)
+bash scripts/std-t61/build_ambe2c.sh       # audio decoder for std-t79, std-t61 and std-t102 (AMBE+ 4000/2400, AMBE+ 2000, AMBE+2 3600x2450; ambe2-c; Windows: build_ambe2c.ps1)
 ```
