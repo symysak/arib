@@ -1,10 +1,9 @@
-package ambeplus
+package ambe
 
-const FrameBits = 128
 
-const ParamBits = 80
+const Bits4000FEC = 128
 
-const MaxDist = 3
+const Params4000 = 80
 
 const protBits = 36
 
@@ -14,7 +13,7 @@ const codedBits = (protBits + tailBits) * 2
 
 const g0, g1 = 0x4f, 0x6d
 
-var chanPos = func() (p [FrameBits]int) {
+var chanPos = func() (p [Bits4000FEC]int) {
 	for i := range p {
 		col, row := i/12, i%12
 		if row < 8 {
@@ -44,8 +43,8 @@ func parity(x int) int {
 	return x & 1
 }
 
-func Encode(params []uint8) []uint8 {
-	coded := make([]uint8, 0, FrameBits)
+func Encode4000(params []uint8) []uint8 {
+	coded := make([]uint8, 0, Bits4000FEC)
 	s := uint8(0)
 	for i := 0; i < protBits+tailBits; i++ {
 		b := uint8(0)
@@ -56,18 +55,18 @@ func Encode(params []uint8) []uint8 {
 		coded = append(coded, tr.out>>1, tr.out&1)
 		s = tr.next
 	}
-	for _, b := range params[protBits:ParamBits] {
+	for _, b := range params[protBits:Params4000] {
 		coded = append(coded, b&1)
 	}
-	ch := make([]uint8, FrameBits)
+	ch := make([]uint8, Bits4000FEC)
 	for i, b := range coded {
 		ch[chanPos[i]] = b
 	}
 	return ch
 }
 
-func Decode(ch []uint8) (params []uint8, dist int) {
-	var coded [FrameBits]uint8
+func Decode4000(ch []uint8) (params []uint8, dist int) {
+	var coded [Bits4000FEC]uint8
 	for i := range coded {
 		coded[i] = ch[chanPos[i]] & 1
 	}
@@ -103,7 +102,7 @@ func Decode(ch []uint8) (params []uint8, dist int) {
 		}
 		metric = next
 	}
-	params = make([]uint8, ParamBits)
+	params = make([]uint8, Params4000)
 	s := uint8(0)
 	for k := steps - 1; k >= 0; k-- {
 		ps := from[k][s]

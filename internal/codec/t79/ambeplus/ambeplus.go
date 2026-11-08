@@ -5,7 +5,8 @@ import (
 	"fmt"
 
 	"github.com/symysak/arib/internal/std-t79/l1"
-	"github.com/symysak/arib/internal/vocoder/ambeplus"
+	"github.com/symysak/arib/internal/vocoder/ambe"
+	"github.com/symysak/arib/internal/vocoder/ambe2-c"
 	"github.com/symysak/arib/internal/voice"
 )
 
@@ -13,13 +14,15 @@ const NameAMBEPlus = "ambeplus"
 
 const t79TCHBits = 256
 
+const maxDist = 3
+
 func init() {
 	voice.Register(voice.Codec{
 		Name:      NameAMBEPlus,
-		Desc:      "AMBE+ 4000/2400（TCH の偶数番・奇数番がそれぞれ 20 ms の 1 フレーム。奇数番が先の 20 ms。表は近似 = mbelib-neo）",
+		Desc:      "AMBE+ 4000/2400（TCH の偶数番・奇数番がそれぞれ 20 ms の 1 フレーム。奇数番が先の 20 ms。復号は ambe2-c の RATET 26）",
 		Ch:        l1.VoiceChannel,
 		Check:     "FEC",
-		Available: ambeplus.Available,
+		Available: ambe2c.Available,
 		New: func(o voice.Options) (voice.Voice, error) {
 			oddFirst := true
 			for k, v := range o {
@@ -41,10 +44,11 @@ func init() {
 
 type ambePlusVoice struct {
 	oddFirst bool
-	stream   *ambeplus.Stream
+	stream   *ambe2c.Stream
 }
 
 type ambePlusUnit struct {
+	ch     [2][]uint8
 	params [2][]uint8
 	good   [2]bool
 }
@@ -67,16 +71,16 @@ func (a *ambePlusVoice) Transport(f voice.Frame) (voice.Unit, bool, error) {
 		if a.oddFirst {
 			first = 1 - k
 		}
-		ch := make([]uint8, ambeplus.FrameBits)
+		ch := make([]uint8, ambe.Bits4000FEC)
 		for i := range ch {
 			ch[i] = f.Bits[2*i+first]
 		}
-		p, d := ambeplus.Decode(ch)
-		u.params[k], u.good[k] = p, d <= ambeplus.MaxDist
+		p, d := ambe.Decode4000(ch)
+		u.ch[k], u.params[k], u.good[k] = ch, p, d <= maxDist
 		ok = ok && u.good[k]
 		sum += d
 	}
-	raw := make([]byte, 0, 2*ambeplus.ParamBits/8)
+	raw := make([]byte, 0, 2*ambe.Params4000/8)
 	for _, p := range u.params {
 		for i := 0; i < len(p); i += 8 {
 			var b byte
@@ -98,20 +102,28 @@ func (a *ambePlusVoice) Decode(u voice.Unit) ([]int16, error) {
 	if !ok {
 		return nil, fmt.Errorf("AMBE+ の単位ではない: %T", u.Data)
 	}
-	out := make([]int16, 0, 2*ambeplus.SamplesPerFrame)
+	out := make([]int16, 0, 2*ambe.SamplesPerFrame)
 	for k := 0; k < 2; k++ {
-		if !d.good[k] || allZero(d.params[k]) {
-			out = append(out, make([]int16, ambeplus.SamplesPerFrame)...)
+		switch {
+		case d.good[k] && allZero(d.params[k]), !d.good[k] && a.stream == nil:
+			out = append(out, make([]int16, ambe.SamplesPerFrame)...)
+			continue
+		case !d.good[k]:
+			pcm, err := a.stream.Lost()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, pcm...)
 			continue
 		}
 		if a.stream == nil {
-			s, err := ambeplus.NewStream()
+			s, err := ambe2c.NewStream(ambe.Rate4000FEC)
 			if err != nil {
 				return nil, err
 			}
 			a.stream = s
 		}
-		pcm, err := a.stream.Push(d.params[k])
+		pcm, err := a.stream.Push(d.ch[k])
 		if err != nil {
 			return nil, err
 		}

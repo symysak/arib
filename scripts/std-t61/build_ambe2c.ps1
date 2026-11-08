@@ -16,15 +16,23 @@ try {
         [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11
 } catch { }
 
-$Repo = 'https://github.com/symysak/mbelib-neo'
-$Commit = 'c37a2e60acbdf987bd9511a1a3523d8fe7fe8506'
+$Repo = 'https://github.com/symysak/ambe2-c'
+$Commit = '70e32cbfc1cf5a08f3e9a3fbe41f6a9873cc4ca6'
 
 $Cli = @'
-/* mbelib-neo を使った AMBE+ 4000/2400 デコーダ CLI。
-   優先順の 80 ビット（10 バイト、MSB 先頭）を受け取り、8kHz int16 LE を毎フレーム flush して返す。 */
+/* ambe2-c を使った AMBE 系デコーダ CLI。引数でレートを選ぶ（AMBE-3000R の RATET）:
+     0   … AMBE+ 2400 bps、誤り訂正なし（48 ビット = 6 バイト）
+     22  … AMBE+ 2400 bps + 誤り訂正 1600 bps（80 ビット = 10 バイト）
+     17  … AMBE+ 4000 bps、誤り訂正なし（80 ビット = 10 バイト。インタリーブ済みのチャネルの並び）
+     26  … AMBE+ 4000 bps + 誤り訂正 2400 bps（128 ビット = 16 バイト）
+     31  … AMBE+ 2000 bps（40 ビット = 5 バイト）
+     33  … AMBE+2 3600x2450（72 ビット = 9 バイト。誤り訂正込み、AMBE-3000R のチャネルの並び）
+     34  … AMBE+2 2450 bps、誤り訂正なし（49 ビット = 7 バイト。AMBE-3000R / ThumbDV の並び）
+   印 1 バイト + フレーム（MSB 先頭）を受け取り、8kHz int16 LE を毎フレーム flush して返す。印が 1 なら消失。 */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <mbelib-neo/mbelib.h>
+#include "blip25.h"
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -37,34 +45,40 @@ int main (int argc, char **argv)
   _setmode (_fileno (stdin), _O_BINARY);
   _setmode (_fileno (stdout), _O_BINARY);
 #endif
-  int verbose = argc > 1 && !strcmp (argv[1], "-v");
-  mbe_ambe4000_decoder *dec = mbe_ambe4000DecoderAlloc ();
-  if (dec == NULL) return 1;
-  unsigned char in[10];
-  char bits[80];
-  short pcm[160];
-  long n = 0;
-  while (fread (in, 1, 10, stdin) == 10) {
-    for (int i = 0; i < 80; i++) bits[i] = (char) ((in[i >> 3] >> (7 - (i & 7))) & 1);
-    mbe_process_result res;
-    if (mbe_processAmbe4000Data (pcm, &res, bits, dec) < 0) memset (pcm, 0, sizeof pcm);
-    fwrite (pcm, sizeof (short), 160, stdout);
-    fflush (stdout);            /* 毎フレーム流さないと呼び出し側が待ち続ける */
-    if (verbose) fprintf (stderr, "frame %ld flags=0x%x\n", n, (unsigned) res.flags);
-    n++;
+  const char *arg = argc > 1 ? argv[1] : "31";
+  int rate = atoi (arg);
+  size_t nb = rate == 0 && strcmp (arg, "0") == 0 ? 6 : rate == 22 || rate == 17 ? 10 : rate == 26 ? 16
+            : rate == 31 ? 5 : rate == 33 ? 9 : rate == 34 ? 7 : 0;
+  if (nb == 0) {
+    fprintf (stderr, "usage: ambe2c_decode 0|22|17|26|31|33|34\n");
+    return 2;
   }
-  mbe_ambe4000DecoderFree (dec);
+  static blip25_decoder dec;
+  unsigned char in[1 + 16];
+  int16_t pcm[160];
+  int errs;
+  blip25_init (&dec);
+  while (fread (in, 1, 1 + nb, stdin) == 1 + nb) {
+    if (in[0] == 1) blip25_decode_lost (&dec, pcm);
+    else if (rate == 0) blip25_decode_ambeplus_r0 (&dec, in + 1, pcm);
+    else if (rate == 22) blip25_decode_ambeplus_r22 (&dec, in + 1, pcm, &errs);
+    else if (rate == 17) blip25_decode_ambeplus_r17 (&dec, in + 1, pcm);
+    else if (rate == 26) blip25_decode_ambeplus_r26 (&dec, in + 1, pcm, &errs);
+    else if (rate == 33) blip25_decode_3600 (&dec, in + 1, pcm, &errs);
+    else if (rate == 34) blip25_decode_2450_thumbdv (&dec, in + 1, pcm);
+    else blip25_decode_ambeplus_r31 (&dec, in + 1, pcm);
+    fwrite (pcm, sizeof (int16_t), 160, stdout);
+    fflush (stdout);            /* 毎フレーム流さないと呼び出し側が待ち続ける */
+  }
   return 0;
 }
 '@
 
 $Sources = @(
-    'src\ambe\ambe3600x2400.c', 'src\ambe\ambe6400x4000.c', 'src\ambe\ambe4000_decode.c',
-    'src\ambe\ambe3600x2400_enc.c', 'src\ambe\dstar_frame.c', 'src\ambe\ambe3600x2450.c',
-    'src\ambe\ambe_common.c', 'src\ecc\ecc.c', 'src\ecc\ecc_const.c',
-    'src\imbe\imbe7100x4400.c', 'src\imbe\imbe7200x4400.c', 'src\core\mbelib.c',
-    'src\core\mbe_pcm_convert.c', 'src\core\mbe_adaptive.c', 'src\core\mbe_unvoiced_fft.c',
-    'src\external\pffft\pffft.c', 'src\external\pffft\fftpack.c'
+    'src\b25_dsp_a.c', 'src\b25_dsp_b.c', 'src\b25_decode_c.c', 'src\b25_decode_d.c',
+    'src\b25_tables.c', 'src\b25_golay.c', 'src\blip25.c', 'src\mbelib_compat.c',
+    'src\ambeplus.c', 'src\ambeplus_tables.c', 'src\ambeplus_fec.c', 'src\ambeplus4000_tables.c',
+    'src\ambeplus_layer2.c'
 )
 
 function Write-Step([string]$Message) { Write-Host "==> $Message" -ForegroundColor Cyan }
@@ -73,7 +87,7 @@ function Write-Note([string]$Message) { Write-Host "    $Message" }
 function Resolve-Root([string]$ScriptDir) {
     $parent = Split-Path -Leaf $ScriptDir
     $grand = Split-Path -Leaf (Split-Path -Parent $ScriptDir)
-    if ($parent -eq 'std-t79' -and $grand -eq 'scripts') {
+    if ($parent -eq 'std-t61' -and $grand -eq 'scripts') {
         return (Split-Path -Parent (Split-Path -Parent $ScriptDir))
     }
     return $ScriptDir
@@ -220,11 +234,10 @@ try {
     } else {
         $root = Resolve-Root $scriptDir
     }
-    $work = Join-Path $root 'build\mbelib-neo'
+    $work = Join-Path $root 'build\ambe2c'
     $src = Join-Path $work 'src'
-    $inc = Join-Path $work 'include'
-    $exe = Join-Path $work 'ambeplus_decode.exe'
-    $zip = Join-Path $work ("mbelib-neo-{0}.zip" -f $Commit)
+    $exe = Join-Path $work 'ambe2c_decode.exe'
+    $zip = Join-Path $work ("ambe2-c-{0}.zip" -f $Commit)
     $url = "$Repo/archive/$Commit.zip"
 
     Write-Step "出力先: $work"
@@ -239,50 +252,39 @@ try {
         if (-not (Test-Path -LiteralPath $SourceZip)) { throw "-SourceZip が見つかりません: $SourceZip" }
         $zip = (Resolve-Path -LiteralPath $SourceZip).Path
     } elseif (-not (Test-Path -LiteralPath $zip)) {
-        Write-Step "mbelib-neo を取得: $url"
+        Write-Step "ambe2-c を取得: $url"
         Invoke-WebRequest -Uri $url -OutFile $zip -UserAgent 'arib-build'
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $src 'src\core\mbelib.c'))) {
+    if (-not (Test-Path -LiteralPath (Join-Path $src 'decoder\src\blip25.c'))) {
         Write-Step '展開'
         $tmp = Join-Path $work 'unzip'
         Expand-ZipFast -Zip $zip -Destination $tmp
-        $top = Get-ChildItem -LiteralPath $tmp -Recurse -File -Filter 'version.h.in' |
-            Where-Object { (Split-Path -Leaf $_.DirectoryName) -eq 'mbelib-neo' } | Select-Object -First 1
-        if (-not $top) { throw 'include\mbelib-neo\version.h.in が見つかりません（zip の中身が想定と違う）' }
+        $top = Get-ChildItem -LiteralPath $tmp -Recurse -File -Filter 'blip25.c' |
+            Where-Object { (Split-Path -Leaf $_.DirectoryName) -eq 'src' } | Select-Object -First 1
+        if (-not $top) { throw 'decoder\src\blip25.c が見つかりません（zip の中身が想定と違う）' }
         $topDir = Split-Path -Parent (Split-Path -Parent $top.DirectoryName)
-        if (-not (Test-Path -LiteralPath (Join-Path $topDir 'src\core\mbelib.c'))) { throw "src\core\mbelib.c が見つかりません: $topDir" }
         if (Test-Path -LiteralPath $src) { Remove-Item -Recurse -Force $src }
         New-Item -ItemType Directory -Force -Path $src | Out-Null
         Copy-Item -Path (Join-Path $topDir '*') -Destination $src -Recurse -Force
         Remove-Item -Recurse -Force $tmp
     }
 
-    Write-Step 'version.h を作る'
-    $incDir = Join-Path $inc 'mbelib-neo'
-    New-Item -ItemType Directory -Force -Path $incDir | Out-Null
-    $tmpl = [IO.File]::ReadAllText((Join-Path $src 'include\mbelib-neo\version.h.in'))
-    [IO.File]::WriteAllText((Join-Path $incDir 'version.h'), ($tmpl -replace '@[A-Z_]*@', '0.0.0'), (New-Object Text.UTF8Encoding($false)))
-
     Write-Step 'ビルド'
-    $cliPath = Join-Path $work 'ambeplus_decode.c'
+    $cliPath = Join-Path $work 'ambe2c_decode.c'
     [IO.File]::WriteAllText($cliPath, ($Cli + "`n"), (New-Object Text.UTF8Encoding($false)))
-    $cflags = if ($env:CFLAGS) { $env:CFLAGS -split ' ' } else { @('-O2', '-std=gnu11') }
-    $defs = @('-DMBE_BUILDING=1', '-DMBE_STATIC=1')
-    $incs = @('-I', (Join-Path $src 'include'), '-I', $inc, '-I', $src,
-        '-I', (Join-Path $src 'src\internal'), '-I', (Join-Path $src 'src\external\pffft'))
-    $files = @($cliPath) + ($Sources | ForEach-Object { Join-Path $src $_ })
-    $ccArgs = @() + $cflags + $defs + $incs + @('-o', $exe) + $files + @('-lm')
+    $dec = Join-Path $src 'decoder'
+    $cflags = if ($env:CFLAGS) { $env:CFLAGS -split ' ' } else { @('-O2', '-std=c99') }
+    $incs = @('-I', (Join-Path $dec 'include'), '-I', (Join-Path $dec 'src'))
+    $files = @($cliPath) + ($Sources | ForEach-Object { Join-Path $dec $_ })
+    $ccArgs = @() + $cflags + $incs + @('-o', $exe) + $files + @('-lm')
     & $cc @ccArgs
     if ($LASTEXITCODE -ne 0) { throw 'コンパイルに失敗しました' }
 
     Write-Step "完成: $exe"
     Write-Host ''
-    Write-Host "std-t79.exe を $root に置いてあれば、AMBE+ 4000/2400 の網の音声が鳴ります（-codec auto / ambeplus）。" -ForegroundColor Green
-    Write-Host "別の場所で使うなら build\mbelib-neo\ を実行ファイルの隣へコピーしてください。"
-    Write-Host ''
-    Write-Host 'AMBE+ 4000/2400 の復号器は soltia48 さんが mbelib-neo に足したものです。ありがとうございます。' -ForegroundColor Yellow
-    Write-Host '元のリポジトリにスターをお願いします: https://github.com/soltia48/mbelib-neo' -ForegroundColor Yellow
+    Write-Host "実行ファイル（std-t61.exe・std-t79.exe・arib.exe など）を $root に置いてあれば、AMBE 系の音声が鳴ります。" -ForegroundColor Green
+    Write-Host "別の場所で使うなら build\ambe2c\ を実行ファイルの隣へコピーしてください。"
 } catch {
     $exitCode = 1
     Write-Host ''
