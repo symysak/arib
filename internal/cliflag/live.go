@@ -35,6 +35,7 @@ type Live struct {
 	Offsets []float64
 	Inputs []InputSpec
 	AcceptNotice bool
+	InputJitterSec float64
 
 	defGain     float64
 	defAGC      bool
@@ -198,6 +199,8 @@ func (l *Live) Register(fs *flag.FlagSet, d LiveDefaults) {
 	fs.StringVar(&l.Ledger, "ledger", "", "台帳の置き場所（既定は <log-dir>/"+sys+"/ledger。none で使わない）")
 	fs.BoolVar(&l.AcceptNotice, "accept-notice", false, "受信を始める前の法的注意（電波法 第 59 条など。LEGAL.md）に同意する。同意は一度だけ記録し、次からは聞かない")
 	fs.BoolVar(&l.FullSpeed, "full-speed", false, "録音ファイルを実時間で流さず全速で処理する（回帰の確認用）")
+	fs.Float64Var(&l.InputJitterSec, "input-jitter", 0, "入力の揺らぎを吸う秒数（既定 0）。無線 LAN 越しの rtl_tcp のように標本が塊で届くと、"+
+		"塊を CPU の詰まりと誤認して局を落とし・手放すので、塊の長さ（3〜5）を書く。局の待ち行列をその秒数ぶん長くし、詰まりはその秒数続いたときだけとみなす")
 	fs.Float64Var(&l.Speed, "speed", 1, "録音ファイルを流す速さの倍率（-full-speed でないとき）")
 	if len(d.Preset) > 0 {
 		l.Preset = append([]float64(nil), d.Preset...)
@@ -327,7 +330,7 @@ func (l *Live) Engine(p Plan) rx.Config {
 	return rx.Config{Source: p.Source, Label: l.Label(), SampleRate: l.SampleRate, Format: l.Format, CenterHz: p.CenterHz,
 		GainDB: l.GainDB, AGC: l.AGC, LogDir: l.LogDir, System: l.System, Channels: p.MHz(), Scan: l.Scan,
 		Realtime: !l.FullSpeed, Speed: l.Speed, FollowVFO: p.FollowVFO && len(l.Inputs) <= 1, AllowEmpty: p.Empty, Preset: l.PresetFor(p),
-		Inputs: l.InputConfigs()}
+		Inputs: l.InputConfigs(), JitterSec: l.InputJitterSec}
 }
 
 func CheckNoArgs(fs *flag.FlagSet) error {

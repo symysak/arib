@@ -29,10 +29,15 @@ type ledgerRow struct {
 	evidence    string
 	note        string
 	orgs        []string
+	codec       string
 }
 
 type OrgReporter interface {
 	Orgs() []string
+}
+
+type CodecReporter interface {
+	LedgerCodec() string
 }
 
 const LedgerFile = "channels.tsv"
@@ -81,6 +86,9 @@ func (l *Ledger) read(fn func(r *ledgerRow)) error {
 					r.orgs = append(r.orgs, o)
 				}
 			}
+		}
+		if len(f) > 6 {
+			r.codec = strings.TrimSpace(f[6])
 		}
 		fn(r)
 		return nil
@@ -139,6 +147,30 @@ func (l *Ledger) Orgs(mhz float64) []string {
 	return nil
 }
 
+func (l *Ledger) SetCodec(mhz float64, codec string) {
+	codec = strings.TrimSpace(strings.NewReplacer("\t", " ").Replace(codec))
+	if codec == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if r := l.rows[l.key(mhz)]; r != nil {
+		r.codec = codec
+	}
+}
+
+func (l *Ledger) Codec(mhz float64) string {
+	if l == nil {
+		return ""
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if r := l.rows[l.key(mhz)]; r != nil {
+		return r.codec
+	}
+	return ""
+}
+
 type Stations interface {
 	Status() Status
 	Channel(id int) Channel
@@ -170,6 +202,9 @@ func (l *Ledger) Observe(e Stations, now time.Time) {
 		if or, ok := ch.(OrgReporter); ok {
 			l.AddOrgs(mhz, or.Orgs())
 		}
+		if cr, ok := ch.(CodecReporter); ok {
+			l.SetCodec(mhz, cr.LedgerCodec())
+		}
 	}
 }
 
@@ -189,11 +224,15 @@ func (l *Ledger) Save() error {
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	var sb strings.Builder
-	sb.WriteString("# 周波数MHz\t初見\t最終\t当たりの証拠\tメモ（ツールは書かない。行を消すとその局は起動時に張り付けない）\t団体（; 区切り）\n")
+	sb.WriteString("# 周波数MHz\t初見\t最終\t当たりの証拠\tメモ（ツールは書かない。行を消すとその局は起動時に張り付けない）\t団体（; 区切り）\t符号器\n")
 	for _, k := range keys {
 		r := l.rows[k]
-		fmt.Fprintf(&sb, "%.4f\t%s\t%s\t%s\t%s\t%s\n", r.mhz, stamp(r.first), stamp(r.last),
+		fmt.Fprintf(&sb, "%.4f\t%s\t%s\t%s\t%s\t%s", r.mhz, stamp(r.first), stamp(r.last),
 			strings.ReplaceAll(r.evidence, "\t", " "), r.note, strings.Join(r.orgs, "; "))
+		if r.codec != "" {
+			sb.WriteString("\t" + r.codec)
+		}
+		sb.WriteString("\n")
 	}
 	return rec.WriteAtomic(l.path, sb.String())
 }

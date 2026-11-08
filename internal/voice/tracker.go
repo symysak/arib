@@ -54,7 +54,8 @@ type Tracker struct {
 
 	havePrev bool
 	prev     Frame
-	cur      Voice
+	lastT float64
+	cur   Voice
 
 	dec     chan decCmd
 	decDone chan struct{}
@@ -85,6 +86,7 @@ func (t *Tracker) setErr(e error) {
 }
 
 func (t *Tracker) Push(f Frame, isVoice bool) {
+	t.lastT = f.TimeSec
 	if !isVoice {
 		t.voiceRun = 0
 		if t.inCall {
@@ -142,7 +144,7 @@ func (t *Tracker) Push(f Frame, isVoice bool) {
 }
 
 func (t *Tracker) keepPrev(f Frame) {
-	t.prev.Ch, t.prev.No, t.prev.TimeSec = f.Ch, f.No, f.TimeSec
+	t.prev.Ch, t.prev.No, t.prev.TimeSec, t.prev.Sub = f.Ch, f.No, f.TimeSec, f.Sub
 	t.prev.Bits = append(t.prev.Bits[:0], f.Bits...)
 	if len(f.Soft) == len(f.Bits) && f.Soft != nil {
 		t.prev.Soft = append(t.prev.Soft[:0], f.Soft...)
@@ -325,7 +327,7 @@ func (t *Tracker) end(timeSec float64) {
 
 func (t *Tracker) Finish() {
 	if t.inCall {
-		t.end(0)
+		t.end(t.lastT)
 	}
 	if t.dec == nil {
 		return

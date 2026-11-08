@@ -34,7 +34,7 @@ function initialState() {
       received: 0, bufferSec: 0, dropped: 0, playing: false,
     },
     filter: { text: '' },
-    logGroups: { station: true, call: true, record: true, system: true },
+    logGroups: { station: true, call: true, data: true, record: true, system: true },
     lastT: 0,
   };
 }
@@ -114,11 +114,15 @@ function createStore() {
         for (const sp of specs) for (const t of sp.snapshotTopics || []) touch(t);
         touch(TOPIC.logs);
         for (const k of Object.keys(state.ext)) touch(k);
+        if (!station(state.selected) && state.stations.length) {
+          store.select((state.stations.find((x) => x.watched !== false) || state.stations[0]).idx);
+        }
         break;
       }
       case 'station':
         applyStation(ev.station);
         touch(TOPIC.stations);
+        if (!station(state.selected)) store.select(ev.station.idx);
         break;
       case 'station_gone': {
         const idx = ev.station && ev.station.idx;

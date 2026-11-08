@@ -48,7 +48,7 @@ type openRec struct {
 }
 
 func newStation(e *Engine, id int, mhz float64) *station {
-	s := &station{e: e, id: id, mhz: mhz, in: make(chan []complex64, queueChunks), done: make(chan struct{}), recs: map[int]*openRec{}}
+	s := &station{e: e, id: id, mhz: mhz, in: make(chan []complex64, e.queueLen()), done: make(chan struct{}), recs: map[int]*openRec{}}
 	s.activeNS.Store(time.Now().UnixNano())
 	return s
 }

@@ -10,8 +10,14 @@ export function init(store) {
   const sub = document.getElementById('audio-sub');
   const spec = store.audioSpec();
   const RATE = spec.rate || DEFAULT_RATE;
-  const JITTER = spec.jitterSec || AUDIO_JITTER_SEC;
-  const MAX_BUFFER = spec.maxBufferSec || AUDIO_MAX_BUFFER_SEC;
+  const BASE_JITTER = spec.jitterSec || AUDIO_JITTER_SEC;
+  const BASE_MAX = spec.maxBufferSec || AUDIO_MAX_BUFFER_SEC;
+  let JITTER = BASE_JITTER, MAX_BUFFER = BASE_MAX;
+  const DELAYS = [0, 1, 2, 3, 5, 8];
+  function applyDelay(d) {
+    JITTER = d > 0 ? d : BASE_JITTER;
+    MAX_BUFFER = d > 0 ? Math.max(BASE_MAX, 2 * d + 2) : BASE_MAX;
+  }
   const extRows = (spec.rows || []).map((r) => `
       <dt>${esc(r.label)}</dt><dd id="${esc(r.id)}">-</dd>`).join('');
   body.innerHTML = `
@@ -25,6 +31,11 @@ export function init(store) {
       <span class="tiny muted">音量</span>
       <input type="range" id="au-vol" min="0" max="300" value="100" style="flex:1">
       <span class="tiny mono" id="au-volv">100%</span>
+    </div>
+    <div class="row">
+      <span class="tiny muted">遅延</span>
+      <select id="au-delay" class="btn">${DELAYS.map((d) => `<option value="${d}">${d > 0 ? `${d} 秒` : `既定（${BASE_JITTER} 秒）`}</option>`).join('')}</select>
+      <span class="tiny muted">塊で届く入力（無線 LAN 越しの rtl_tcp）は長く</span>
     </div>
     <div class="row"><span class="badge idle" id="au-now">再生を開始してください</span></div>
     <div class="row"><span class="tiny muted">聴取中</span><select id="au-ch" class="btn"></select></div>
@@ -182,6 +193,19 @@ export function init(store) {
   $('au-auto').addEventListener('change', (e) => {
     setPrefAuto(e.target.checked);
     if (e.target.checked) start();
+  });
+
+  const PREF_DELAY = 'webui.audio.delay';
+  function prefDelay() {
+    try { const v = Number(localStorage.getItem(PREF_DELAY)); return DELAYS.includes(v) ? v : 0; } catch { return 0; }
+  }
+  applyDelay(prefDelay());
+  $('au-delay').value = String(prefDelay());
+  $('au-delay').addEventListener('change', (e) => {
+    const d = Number(e.target.value);
+    try { localStorage.setItem(PREF_DELAY, String(d)); } catch {  }
+    applyDelay(d);
+    for (const st of streams.values()) stopPendingOf(st);
   });
 
   $('au-start').addEventListener('click', () => { start(); });

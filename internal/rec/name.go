@@ -75,6 +75,10 @@ func cleanLabel(s string) string {
 	}, s)
 }
 
+func DataLog(dir string, t time.Time, mhz float64) string {
+	return filepath.Join(dir, "data", fmt.Sprintf("%s_%.4fMHz.tsv", t.Format(dateLayout), mhz))
+}
+
 func Path(base string, k Kind) string { return base + "." + string(k) }
 
 func Rel(root, path string) string {

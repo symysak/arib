@@ -2,7 +2,7 @@ import { TOPIC } from '../store.js';
 import { hms } from '../time.js';
 import { el, setText, syncList } from '../dom.js';
 
-const GROUPS = [['station', '局状態'], ['call', '通話'], ['record', '録音'], ['system', 'システム']];
+const GROUPS = [['station', '局状態'], ['call', '通話'], ['data', 'データ'], ['record', '録音'], ['system', 'システム']];
 
 export function init(store) {
   const bar = document.getElementById('log-toolbar');

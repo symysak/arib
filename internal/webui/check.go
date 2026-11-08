@@ -22,7 +22,7 @@ func AbsoluteRefs(fsys fs.FS) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == "vendor" {
+			if d.Name() == "vendor" || d.Name() == "lib" {
 				return fs.SkipDir
 			}
 			return nil

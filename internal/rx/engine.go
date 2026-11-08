@@ -36,6 +36,7 @@ type Config struct {
 	Channels []float64
 	Ledger []float64
 	Scan ScanConfig
+	JitterSec float64
 	OnStart func(describe string, sampleRate float64)
 	OnEmit  func(ch int, ev any)
 	OnAudio func(ch, id int, pcm []int16, rate int)
@@ -71,6 +72,7 @@ type Engine struct {
 	claimed func(mhz float64) bool
 	homeless func(mhz float64, kind int) bool
 
+	hiSince time.Time
 	elapsed float64
 	read int64
 	wg   sync.WaitGroup
@@ -90,6 +92,25 @@ type Engine struct {
 
 func New(std Standard, cfg Config) *Engine {
 	return &Engine{std: std, cfg: cfg, band: &bandState{}, ids: map[int64]int{}, byID: map[int]*station{}, nextID: cfg.IDBase}
+}
+
+func (e *Engine) queueLen() int {
+	n := queueChunks
+	if e.cfg.JitterSec > 0 {
+		n += int(math.Ceil(e.cfg.JitterSec / 0.1))
+	}
+	return n
+}
+
+func (e *Engine) pressure(ss []*station, now time.Time) bool {
+	if !anyBacklog(ss) {
+		e.hiSince = time.Time{}
+		return false
+	}
+	if e.hiSince.IsZero() {
+		e.hiSince = now
+	}
+	return now.Sub(e.hiSince).Seconds() >= e.cfg.JitterSec
 }
 
 func (e *Engine) Add(mhz float64, opt any) error {
@@ -462,7 +483,7 @@ func (e *Engine) applyCmds(ss []*station) []*station {
 }
 
 func (e *Engine) distribute(ss []*station, iq []complex64, lossy bool) {
-	pressure := lossy && anyBacklog(ss)
+	pressure := lossy && e.pressure(ss, time.Now())
 	for _, s := range ss {
 		if !lossy {
 			s.in <- iq

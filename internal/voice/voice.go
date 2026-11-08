@@ -16,6 +16,7 @@ type Frame struct {
 	TimeSec float64
 	Bits    []uint8
 	Soft    []float32
+	Sub int
 }
 
 type Check struct {

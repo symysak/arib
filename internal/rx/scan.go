@@ -182,7 +182,7 @@ func (e *Engine) scanStep(ss []*station, now float64) []*station {
 		keep = append(keep, s)
 	}
 	ss = keep
-	if anyBacklog(ss) {
+	if e.pressure(ss, time.Now()) {
 		if v := evictUnsynced(ss, o, time.Now()); v != nil {
 			e.lg.Printf("%.4f MHz: CPU が詰まっているので、%.0f 分同期しないこの局を手放す",
 				v.mhz, time.Since(v.activeAt()).Minutes())
