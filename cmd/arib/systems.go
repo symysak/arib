@@ -11,6 +11,8 @@ import (
 	"github.com/symysak/arib/internal/cliflag"
 	"github.com/symysak/arib/internal/iqsrc"
 	"github.com/symysak/arib/internal/rx"
+	t102cli "github.com/symysak/arib/internal/std-t102/cli"
+	t102 "github.com/symysak/arib/internal/std-t102/server"
 	t115cli "github.com/symysak/arib/internal/std-t115/qpsknarrow/cli"
 	t115 "github.com/symysak/arib/internal/std-t115/qpsknarrow/server"
 	t61cli "github.com/symysak/arib/internal/std-t61/cli"
@@ -98,6 +100,8 @@ func order(s *System) string {
 		pre = "3"
 	case T79Family:
 		pre = "4"
+	case T102Family:
+		pre = "5"
 	}
 	if s.Plain {
 		return pre + "0" + s.Name
@@ -122,6 +126,8 @@ func init() {
 		Live: t61cli.Live, New: func(e Env) (Monitor, error) { return NewT61(e, nil, nil), nil }})
 	register(&System{Name: "t79", Dir: t79.System, Label: "STD-T79", Family: T79Family, Plain: true,
 		Live: t79cli.Live, New: newT79})
+	register(&System{Name: "t102", Dir: t102.System, Label: "STD-T102 第 2 編", Family: T102Family, Plain: true,
+		Live: t102cli.Live, New: newT102})
 }
 
 
@@ -264,4 +270,29 @@ func newT79(e Env) (Monitor, error) {
 	ec.Open, ec.LogDir, ec.LogOut, ec.Inputs = e.Open, e.LogDir, e.LogOut, nil
 	m := t79.NewMonitor(t79.Config{Engine: ec, Codec: "auto", AudioTap: audioTap(e)})
 	return &t79Mon{m: m}, nil
+}
+
+
+const T102Family = "STD-T102"
+
+type t102Mon struct {
+	m *t102.Monitor
+}
+
+func (t *t102Mon) Handler() http.Handler         { return t.m.Handler() }
+func (t *t102Mon) Run(ctx context.Context) error { return t.m.Run(ctx) }
+func (t *t102Mon) Engine() rx.Stations           { return engineStations(t.m.Engine()) }
+func (t *t102Mon) Evidence() Evidence {
+	c := t.m.HeardCodec()
+	if c == "" {
+		return Evidence{}
+	}
+	return Evidence{Codec: c, Text: "音声の符号器 " + c}
+}
+
+func newT102(e Env) (Monitor, error) {
+	ec := e.Live.Engine(e.Plan)
+	ec.Open, ec.LogDir, ec.LogOut, ec.Inputs = e.Open, e.LogDir, e.LogOut, nil
+	m := t102.NewMonitor(t102.Config{Engine: ec, Codec: "auto", AudioAGC: true, AudioTap: audioTap(e)})
+	return &t102Mon{m: m}, nil
 }
