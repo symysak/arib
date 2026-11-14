@@ -124,6 +124,7 @@ func (c *Channel) codecHint(name, why string) {
 		c.logf(-1, "call", "warn", "伝達能力が符号器 %s を名乗ったが、T79 の登録表に無い", name)
 		return
 	}
+	cd = voice.Preferred(cd)
 	c.setCodec(&cd, why)
 	for m := range c.calls {
 		cs := &c.calls[m]

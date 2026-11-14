@@ -64,6 +64,8 @@ type Codec struct {
 	Tentative bool
 	ManualOnly bool
 	Available func() bool
+	Supersedes string
+	Ready func() bool
 	New func(o Options) (Voice, error)
 	Probe func(frames []Frame) (ok, n int)
 	Rank func(frames []Frame, masks [][]uint8) []float64
@@ -122,6 +124,45 @@ func Codecs(chs ...Channel) []Codec {
 		return out[i].Ch < out[j].Ch
 	})
 	return out
+}
+
+func Preferred(c Codec) Codec {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return preferredLocked(c)
+}
+
+func preferredLocked(c Codec) Codec {
+	for depth := 0; depth < 8; depth++ {
+		next, ok := supersederLocked(c)
+		if !ok {
+			break
+		}
+		c = next
+	}
+	return c
+}
+
+func supersederLocked(c Codec) (Codec, bool) {
+	for _, s := range reg {
+		if s.Ch == c.Ch && s.Supersedes != "" && strings.EqualFold(s.Supersedes, c.Name) && (s.Ready == nil || s.Ready()) {
+			return s, true
+		}
+	}
+	return c, false
+}
+
+func Superseded(c Codec) bool {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return preferredLocked(c).Name != c.Name
+}
+
+func PreferredName(ch Channel, name string) string {
+	if c, ok := Lookup(ch, name); ok {
+		return Preferred(c).Name
+	}
+	return name
 }
 
 func Names(chs ...Channel) string {

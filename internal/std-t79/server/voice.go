@@ -303,7 +303,7 @@ func (c *Channel) probe(n int, f decoder.TCHFrame) {
 	}
 	if c.vs.cands[n] == nil {
 		for _, cd := range Codecs() {
-			if cd.Tentative || cd.ManualOnly || (cd.Available != nil && !cd.Available()) {
+			if cd.Tentative || cd.ManualOnly || (cd.Available != nil && !cd.Available()) || voice.Superseded(cd) {
 				continue
 			}
 			if v, err := cd.New(voice.Options{}); err == nil {

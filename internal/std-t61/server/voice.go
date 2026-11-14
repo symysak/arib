@@ -160,7 +160,7 @@ func newVoiceRun(p *Pipeline, s *stationState) *voiceRun {
 		return r
 	}
 	for _, c := range voice.Codecs(t61voice.TCH, t61voice.TCH1) {
-		if (c.Ch != t61voice.TCH && c.Ch != t61voice.TCH1) || c.Tentative || c.ManualOnly || (c.Available != nil && !c.Available()) {
+		if (c.Ch != t61voice.TCH && c.Ch != t61voice.TCH1) || c.Tentative || c.ManualOnly || (c.Available != nil && !c.Available()) || voice.Superseded(c) {
 			continue
 		}
 		if v, err := c.New(r.codecOpts(c, nil)); err == nil {
@@ -180,6 +180,7 @@ func (r *voiceRun) startFromLedger() {
 		return
 	}
 	c, ok := codecByName(name)
+	c = voice.Preferred(c)
 	if !ok || c.Tentative || (c.Ch != t61voice.TCH && c.Ch != t61voice.TCH1) || (c.Available != nil && !c.Available()) {
 		return
 	}
@@ -426,6 +427,7 @@ func (r *voiceRun) deliver(f dec.Frame, vf voice.Frame, isVoice bool) {
 	}
 	if b := BearerCodec(f); b != "" {
 		if c, ok := codecByName(b); ok && c.Ch == vf.Ch {
+			c = voice.Preferred(c)
 			r.start(&c, c.Name, "呼設定の伝達能力 "+b)
 			r.curT = f.TimeSec
 			r.tr.Push(vf, isVoice)
