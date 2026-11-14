@@ -67,8 +67,19 @@ func (r *rtlSource) send(cmd byte, v float64) error {
 	if math.IsNaN(v) || v < 0 || v > math.MaxUint32 {
 		return fmt.Errorf("rtl_tcp のコマンド 0x%02x の値が範囲外です: %v", cmd, v)
 	}
+	return r.sendRaw(cmd, uint32(v))
+}
+
+func (r *rtlSource) sendInt(cmd byte, v float64) error {
+	if math.IsNaN(v) || v < math.MinInt32 || v > math.MaxInt32 {
+		return fmt.Errorf("rtl_tcp のコマンド 0x%02x の値が範囲外です: %v", cmd, v)
+	}
+	return r.sendRaw(cmd, uint32(int32(v)))
+}
+
+func (r *rtlSource) sendRaw(cmd byte, v uint32) error {
 	b := []byte{cmd, 0, 0, 0, 0}
-	binary.BigEndian.PutUint32(b[1:], uint32(v))
+	binary.BigEndian.PutUint32(b[1:], v)
 	r.wmu.Lock()
 	defer r.wmu.Unlock()
 	_ = r.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
@@ -99,7 +110,7 @@ func (r *rtlSource) SetGain(db float64, agc bool) error {
 	if err := r.send(rtlCmdSetGainMode, 1); err != nil {
 		return err
 	}
-	return r.send(rtlCmdSetGain, math.Round(db*10))
+	return r.sendInt(rtlCmdSetGain, math.Round(db*10))
 }
 
 func (r *rtlSource) Tune() <-chan Tuning { return r.feed.ch }
