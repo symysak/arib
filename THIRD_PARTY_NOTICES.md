@@ -81,7 +81,7 @@ C ソースとテストベクタで、加工せずに置いてある。`std-t86`
 
 ### ambe2-c（symysak/ambe2-c。復号部は blip25-vocoder の派生）
 
-`std-t79`・`std-t61`・`std-t102`・`arib` の音声（AMBE+ 4000/2400・AMBE+ 2000・AMBE+2 3600x2450）に使う。MIT。同梱しない（実行ファイルにも
+`std-t79`・`std-t61`・`std-t102`・`std-t98-fsk4`・`arib` の音声（AMBE+ 4000/2400・AMBE+ 2000・AMBE+2 3600x2450）に使う。MIT。同梱しない（実行ファイルにも
 組み込まない。子プロセスとして呼ぶ）。`build_ambe2c.sh`（Windows は `build_ambe2c.ps1`）が GitHub から取得してビルドする。取得したものは
 その条件に従う（AMBE+2 には特許の注記がある）。
 
