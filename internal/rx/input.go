@@ -1,6 +1,7 @@
 package rx
 
 import (
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -56,22 +57,30 @@ func ReopenSource(src *iqsrc.Source, open func() (iqsrc.Source, error), lg *Logg
 
 type HeadRing struct {
 	chunks [][]complex64
-	head   int
-	full   bool
+	total  int
+	max    int
 }
 
-func NewHeadRing(n int) *HeadRing {
+func NewHeadRing(sec, rate float64) *HeadRing {
+	n := int(math.Ceil(sec * rate))
 	if n <= 0 {
 		return nil
 	}
-	return &HeadRing{chunks: make([][]complex64, n)}
+	return &HeadRing{max: n}
 }
 
+func (r *HeadRing) Len() int { return len(r.chunks) }
+
 func (r *HeadRing) Push(iq []complex64) {
-	r.chunks[r.head] = iq
-	r.head++
-	if r.head == len(r.chunks) {
-		r.head, r.full = 0, true
+	if len(iq) == 0 {
+		return
+	}
+	r.chunks = append(r.chunks, iq)
+	r.total += len(iq)
+	for len(r.chunks) > 1 && r.total-len(r.chunks[0]) >= r.max {
+		r.total -= len(r.chunks[0])
+		r.chunks[0] = nil
+		r.chunks = r.chunks[1:]
 	}
 }
 
@@ -82,23 +91,15 @@ func (r *HeadRing) Replay(ch chan<- []complex64) int {
 
 func (r *HeadRing) replay(ch chan<- []complex64) (int, int64) {
 	n := len(r.chunks)
-	if !r.full {
-		n = r.head
-	}
 	if avail := cap(ch) - len(ch) - 1; avail < n {
 		n = avail
 	}
 	if n <= 0 {
 		return 0, 0
 	}
-	start := r.head - n
-	if start < 0 {
-		start += len(r.chunks)
-	}
 	sent := 0
 	var samples int64
-	for i := 0; i < n; i++ {
-		c := r.chunks[(start+i)%len(r.chunks)]
+	for _, c := range r.chunks[len(r.chunks)-n:] {
 		select {
 		case ch <- c:
 			sent++

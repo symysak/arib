@@ -205,7 +205,11 @@ func (e *Engine) idFor(mhz float64) int {
 
 func (e *Engine) add(mhz float64, kind int, opt any) *station {
 	id := e.idFor(mhz)
-	s := newStation(e, id, mhz)
+	replay := 0
+	if kind == scanVerifying && e.head != nil {
+		replay = e.head.Len()
+	}
+	s := newStationRoom(e, id, mhz, replay)
 	s.kind, s.since = kind, e.elapsed
 	var replayed int64
 	if kind == scanVerifying && e.head != nil {
@@ -331,7 +335,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 		e.blocked = newBlocklist(e.std.Grid())
 		if o.Scan.HeadS > 0 {
-			e.head = NewHeadRing(int(math.Ceil(o.Scan.HeadS / 0.1)))
+			e.head = NewHeadRing(o.Scan.HeadS, rate)
 			lg.Printf("走査で見つけた局には直前 %.1f 秒の帯域 I/Q を流し込んで頭を復元する", o.Scan.HeadS)
 		}
 		lg.Printf("帯域走査: 中心 %.4f MHz ± %.0f kHz（%.0f スロット）を見張り、当たりに最大 %d 局まで張り付ける",
@@ -490,6 +494,10 @@ func (e *Engine) distribute(ss []*station, iq []complex64, lossy bool) {
 			continue
 		}
 		if pressure && s.backlog() >= shedLowWater && !s.recording.Load() && s.kind != scanPinned {
+			s.dropped.Add(1)
+			continue
+		}
+		if s.backlog() >= s.qlen {
 			s.dropped.Add(1)
 			continue
 		}

@@ -18,6 +18,7 @@ type station struct {
 	offHz float64
 	ch    Channel
 	in    chan []complex64
+	qlen int
 	done chan struct{}
 	dropped atomic.Int64
 	replayLeft atomic.Int64
@@ -47,8 +48,11 @@ type openRec struct {
 	tailLeft int
 }
 
-func newStation(e *Engine, id int, mhz float64) *station {
-	s := &station{e: e, id: id, mhz: mhz, in: make(chan []complex64, e.queueLen()), done: make(chan struct{}), recs: map[int]*openRec{}}
+func newStation(e *Engine, id int, mhz float64) *station { return newStationRoom(e, id, mhz, 0) }
+
+func newStationRoom(e *Engine, id int, mhz float64, replay int) *station {
+	q := e.queueLen()
+	s := &station{e: e, id: id, mhz: mhz, qlen: q, in: make(chan []complex64, q+max(replay, 0)), done: make(chan struct{}), recs: map[int]*openRec{}}
 	s.activeNS.Store(time.Now().UnixNano())
 	return s
 }

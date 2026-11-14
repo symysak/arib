@@ -149,7 +149,7 @@ func (e *Engine) rebuild(ss []*station) []*station {
 		e.det = e.std.NewDetector(DetectorConfig{FsIn: e.rate, CenterHz: e.cfg.CenterHz, SNRdB: e.cfg.Scan.SNRdB})
 		e.blocked = newBlocklist(e.std.Grid())
 		if e.head != nil {
-			e.head = NewHeadRing(len(e.head.chunks))
+			e.head = NewHeadRing(e.cfg.Scan.HeadS, e.rate)
 		}
 	}
 	e.lg.Printf("中心を %.4f MHz へ移した（局 %d 本を作り直した）", e.cfg.CenterHz/1e6, len(out))

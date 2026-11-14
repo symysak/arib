@@ -383,7 +383,7 @@ func (w *Wide) Run(ctx context.Context) error {
 		anyScan = true
 		e.blocked = newBlocklist(w.std.Grid())
 		if e.cfg.Scan.HeadS > 0 {
-			e.head = NewHeadRing(int(math.Ceil(e.cfg.Scan.HeadS / 0.1)))
+			e.head = NewHeadRing(e.cfg.Scan.HeadS, e.rate)
 		}
 		lg.Printf("帯域走査（%s）: 中心 %.4f MHz ± %.0f kHz を見張り、当たりに最大 %d 局まで張り付ける",
 			in.label, e.cfg.CenterHz/1e6, e.det.Edge()/1e3, e.cfg.Scan.Max)
