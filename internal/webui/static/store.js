@@ -30,7 +30,7 @@ function initialState() {
     logs: [],
     trend: new Map(),
     audio: {
-      follow: false, listening: -1, volume: 1.0, muted: false,
+      listening: -1, volume: 1.0, muted: false,
       received: 0, bufferSec: 0, dropped: 0, playing: false,
     },
     filter: { text: '' },
@@ -245,6 +245,11 @@ function createStore() {
       touchAll();
       for (const sp of specs) if (sp.selected) sp.selected(idx, api);
     },
+    pick(idx) {
+      if (state.showAll) store.setShowAll(false);
+      store.select(idx);
+    },
+    marked(idx) { return !state.showAll && idx === state.selected; },
     setShowAll(v) { state.showAll = !!v; touchAll(); },
     setAudio(patch) { Object.assign(state.audio, patch); touch(TOPIC.audio); },
     setFilter(patch) {

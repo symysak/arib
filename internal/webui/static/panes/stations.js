@@ -41,7 +41,7 @@ export function init(store) {
         : st.synced ? ['on', '同期'] : ['off', '未同期'];
       setClass(p.dot, `dot ${dot}`);
       setText(p.stateText, label);
-      setClass(tr, [st.idx === s.selected ? 'sel' : '', st.watched === false ? 'idle-row' : ''].filter(Boolean).join(' '));
+      setClass(tr, [store.marked(st.idx) ? 'sel' : '', st.watched === false ? 'idle-row' : ''].filter(Boolean).join(' '));
       setText(p.level, Number.isFinite(st.level_db) ? `${st.level_db.toFixed(1)} dB` : '-');
       setText(p.last, st.ledger ? wallShort(st.ledger_last_ms) : (st.last_t_sec ? hms(st.last_t_sec) : '-'));
     });
@@ -52,7 +52,7 @@ export function init(store) {
 
   tbody.addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
-    if (tr && tr.dataset.idx !== undefined) store.select(Number(tr.dataset.idx));
+    if (tr && tr.dataset.idx !== undefined) store.pick(Number(tr.dataset.idx));
   });
 
   store.on(TOPIC.stations, draw);

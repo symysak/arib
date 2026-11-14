@@ -71,7 +71,7 @@ export function init(store) {
     const tr = e.target.closest('tr');
     if (!tr) return;
     sel = Number(tr.dataset.idx);
-    store.select(sel);
+    store.pick(sel);
     draw();
   });
   store.on('t79.net', draw);

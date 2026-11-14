@@ -25,7 +25,6 @@ export function init(store) {
       <button class="btn" id="au-start">再生開始</button>
       <button class="btn" id="au-mute">ミュート</button>
       <label class="tiny"><input type="checkbox" id="au-auto" checked> 自動再生</label>
-      <label class="tiny"><input type="checkbox" id="au-follow"> 自動追従（ヘッダーと同じ）</label>
     </div>
     <div class="row">
       <span class="tiny muted">音量</span>
@@ -222,14 +221,7 @@ export function init(store) {
     $('au-volv').className = v > 1 ? 'tiny mono' : 'tiny mono muted';
     if (gain && !store.state.audio.muted) gain.gain.value = v;
   });
-  function setFollow(v) {
-    store.setAudio({ follow: !!v });
-  }
-  $('au-follow').addEventListener('change', (e) => setFollow(e.target.checked));
-  $('au-ch').addEventListener('change', (e) => {
-    setFollow(false);
-    store.select(Number(e.target.value));
-  });
+  $('au-ch').addEventListener('change', (e) => store.pick(Number(e.target.value)));
 
   function tick() {
     const s = store.state;
@@ -237,7 +229,6 @@ export function init(store) {
     if (store.station(s.selected) && s.selected !== listening) setListening(s.selected);
     if (!playAll() && wasAll) stopOthers(listening);
     wasAll = playAll();
-    $('au-follow').checked = !!s.audio.follow;
     $('au-recv').textContent = `${receivedSec.toFixed(1)} 秒`;
     let ph = 0;
     if (playAll()) { for (const st of streams.values()) ph = Math.max(ph, st.playhead); }

@@ -137,7 +137,7 @@ export function init(store) {
       const live = new Set(s.stations.map((x) => x.idx));
       for (const idx of [...rows.keys()]) if (!live.has(idx)) rows.delete(idx);
     }
-    for (const st of s.stations) update(st, st.idx === s.selected);
+    for (const st of s.stations) update(st, store.marked(st.idx));
     const sync = s.stations.filter((x) => x.synced).length;
     const rich = s.stations.filter((x) => x.synced && x.rich_ok).length;
     const past = s.stations.filter((x) => x.ledger).length;
@@ -148,7 +148,7 @@ export function init(store) {
 
   tbody.addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
-    if (tr && tr.dataset.idx !== undefined) store.select(Number(tr.dataset.idx));
+    if (tr && tr.dataset.idx !== undefined) store.pick(Number(tr.dataset.idx));
   });
 
   store.on(TOPIC.stations, draw);

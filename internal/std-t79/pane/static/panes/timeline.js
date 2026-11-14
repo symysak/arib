@@ -50,7 +50,7 @@ export function init(store) {
   cv.addEventListener('click', (e) => {
     const r = cv.getBoundingClientRect();
     const st = store.state.stations[Math.floor((e.clientY - r.top) / LANE_H)];
-    if (st) store.select(st.idx);
+    if (st) store.pick(st.idx);
   });
 
   function draw() {
@@ -93,10 +93,10 @@ export function init(store) {
           }
         }
       }
-      g.fillStyle = st.idx === s.selected ? COLOR.ink() : COLOR.ink3();
-      g.font = `${st.idx === s.selected ? 'bold ' : ''}10px ui-monospace, monospace`;
+      g.fillStyle = store.marked(st.idx) ? COLOR.ink() : COLOR.ink3();
+      g.font = `${store.marked(st.idx) ? 'bold ' : ''}10px ui-monospace, monospace`;
       g.fillText(st.mhz.toFixed(4) + (st.watched ? '' : ' 終'), 4, y + LANE_H / 2 + 1);
-      if (st.idx === s.selected) {
+      if (store.marked(st.idx)) {
         g.strokeStyle = COLOR.accent();
         g.strokeRect(LEFT - 1.5, y - 1.5, w - LEFT - 2, LANE_H - 3);
       }

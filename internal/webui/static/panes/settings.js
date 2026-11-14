@@ -57,10 +57,13 @@ export function init(_store) {
     const addBtn = el('button', { class: 'btn', text: '局を足す' });
     const list = el('div', { class: 'scroll' });
     const empty = el('div', { class: 'muted tiny', text: '監視している局はありません（上で足せます）' });
+    const addRow = el('div', { class: 'row' }, [addIn, kindSel, addBtn]);
+    const paneEl = document.getElementById('pane-settings');
+    if (paneEl && paneEl.dataset.fixedChannels !== undefined) addRow.style.display = 'none';
     const box = el('div', {}, [
       head, kv,
       el('div', { class: 'row' }, [tuneIn, tuneBtn, gainIn, el('label', { class: 'tiny' }, [agcIn, ' AGC']), gainBtn]),
-      el('div', { class: 'row' }, [addIn, kindSel, addBtn]),
+      addRow,
       list, empty,
     ]);
     const b = { id, box, head, title, v, tuneIn, tuneBtn, gainIn, agcIn, gainBtn, addIn, kindSel, addBtn, list, empty, first: true, label: '' };

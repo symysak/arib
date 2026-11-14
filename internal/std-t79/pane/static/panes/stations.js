@@ -60,7 +60,7 @@ export function init(store) {
               : st.synced ? ['on', '同期'] : ['off', '未同期'];
       setClass(p.dot, `dot ${dot}`);
       setText(p.stateText, label);
-      setClass(tr, [st.idx === s.selected ? 'sel' : '', st.watched === false ? 'idle-row' : ''].filter(Boolean).join(' '));
+      setClass(tr, [store.marked(st.idx) ? 'sel' : '', st.watched === false ? 'idle-row' : ''].filter(Boolean).join(' '));
       setText(p.org, st.org || '-');
       setText(p.kind, st.kind ? `${st.kind.replace('キャリア', '')} CC${st.cc}` : '-');
       p.kind.title = st.pair_mhz ? `${st.dir === '上り' ? '下り' : '上り'}は ${st.pair_mhz.toFixed(4)} MHz` : '';
@@ -90,7 +90,7 @@ export function init(store) {
 
   tbody.addEventListener('click', (e) => {
     const tr = e.target.closest('tr');
-    if (tr && tr.dataset.idx !== undefined) store.select(Number(tr.dataset.idx));
+    if (tr && tr.dataset.idx !== undefined) store.pick(Number(tr.dataset.idx));
   });
 
   store.on(TOPIC.stations, draw);

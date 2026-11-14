@@ -63,7 +63,7 @@ export function init(store) {
     const mhz = tr && Number(tr.dataset.mhz);
     if (!mhz) return;
     const st = store.state.stations.find((x) => Math.abs(x.mhz - mhz) < 0.0125);
-    if (st) store.select(st.idx);
+    if (st) store.pick(st.idx);
   });
   onlyBox.addEventListener('change', () => { onlySel.classList.toggle('sel', onlyBox.checked); draw(); });
   filter.addEventListener('input', draw);
