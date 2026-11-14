@@ -23,6 +23,8 @@ import (
 	t79 "github.com/symysak/arib/internal/std-t79/server"
 	t86cli "github.com/symysak/arib/internal/std-t86/cli"
 	t86 "github.com/symysak/arib/internal/std-t86/server"
+	t98cli "github.com/symysak/arib/internal/std-t98/fsk4/cli"
+	t98 "github.com/symysak/arib/internal/std-t98/fsk4/server"
 )
 
 type System struct {
@@ -102,6 +104,8 @@ func order(s *System) string {
 		pre = "4"
 	case T102Family:
 		pre = "5"
+	case T98Family:
+		pre = "6"
 	}
 	if s.Plain {
 		return pre + "0" + s.Name
@@ -128,6 +132,8 @@ func init() {
 		Live: t79cli.Live, New: newT79})
 	register(&System{Name: "t102", Dir: t102.System, Label: "STD-T102 第 2 編", Family: T102Family, Plain: true,
 		Live: t102cli.Live, New: newT102})
+	register(&System{Name: "t98-fsk4", Dir: t98.System, Label: "STD-T98 第 3 編（デジタル簡易無線）", Family: T98Family, Plain: true,
+		Live: t98cli.Live, New: newT98})
 }
 
 
@@ -295,4 +301,33 @@ func newT102(e Env) (Monitor, error) {
 	ec.Open, ec.LogDir, ec.LogOut, ec.Inputs = e.Open, e.LogDir, e.LogOut, nil
 	m := t102.NewMonitor(t102.Config{Engine: ec, Codec: "auto", AudioAGC: true, AudioTap: audioTap(e)})
 	return &t102Mon{m: m}, nil
+}
+
+
+const T98Family = "STD-T98 第 3 編"
+
+type t98Mon struct {
+	m *t98.Monitor
+}
+
+func (t *t98Mon) Handler() http.Handler         { return t.m.Handler() }
+func (t *t98Mon) Run(ctx context.Context) error { return t.m.Run(ctx) }
+func (t *t98Mon) Engine() rx.Stations           { return engineStations(t.m.Engine()) }
+func (t *t98Mon) Evidence() Evidence {
+	if c := t.m.HeardCodec(); c != "" {
+		return Evidence{Codec: c, Text: "音声の符号器 " + c}
+	}
+	for _, st := range t.m.Snapshot().Stations {
+		if st.Caller != "" {
+			return Evidence{Text: "同期バーストの呼出名称（PICH の CRC12）"}
+		}
+	}
+	return Evidence{}
+}
+
+func newT98(e Env) (Monitor, error) {
+	ec := e.Live.Engine(e.Plan)
+	ec.Open, ec.LogDir, ec.LogOut, ec.Inputs = e.Open, e.LogDir, e.LogOut, nil
+	m := t98.NewMonitor(t98.Config{Engine: ec, Codec: "auto", AudioAGC: true, AudioTap: audioTap(e)})
+	return &t98Mon{m: m}, nil
 }

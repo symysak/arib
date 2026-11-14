@@ -6,4 +6,5 @@ import (
 	_ "github.com/symysak/arib/internal/codec/std-t61/ambe-f72"
 	_ "github.com/symysak/arib/internal/codec/std-t61/ambeplus-a1"
 	_ "github.com/symysak/arib/internal/codec/std-t79/ambeplus"
+	_ "github.com/symysak/arib/internal/codec/std-t98/ambe"
 )
