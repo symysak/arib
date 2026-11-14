@@ -7,39 +7,41 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/symysak/arib/internal/nxdn/decoder"
+	"github.com/symysak/arib/internal/nxdn/l1"
 	"github.com/symysak/arib/internal/rec"
-	"github.com/symysak/arib/internal/std-t102/decoder"
-	"github.com/symysak/arib/internal/std-t102/l1"
 	"github.com/symysak/arib/internal/voice"
 	"github.com/symysak/arib/internal/voice/agc"
 	"github.com/symysak/arib/internal/wavio"
 )
 
+const CodecMinChecks = 10
+
 const (
 	codecPending   = 75
-	codecMinChecks = 10
+	codecMinChecks = CodecMinChecks
 	codecMinRatio  = 0.5
 	codecWindow    = 2 * codecMinChecks
 )
 
-func Codecs() []voice.Codec { return voice.Codecs(l1.VoiceChannel) }
+func Codecs(ch voice.Channel) []voice.Codec { return voice.Codecs(ch) }
 
-func CodecNames() string { return voice.Names(l1.VoiceChannel) }
+func CodecNames(ch voice.Channel) string { return voice.Names(ch) }
 
-func CheckCodec(name string, opt voice.Options) (notes []string, err error) {
+func CheckCodec(ch voice.Channel, name string, opt voice.Options) (notes []string, err error) {
 	switch name {
 	case "", "off", "auto":
 		if len(opt) != 0 {
 			return nil, fmt.Errorf("-codec-opt は -codec <符号器の名前> と一緒に使う（auto / off には設定が無い）")
 		}
-		if name == "auto" && len(Codecs()) == 0 {
-			notes = append(notes, "注意: T102 の TCH を読む符号器が 1 つも登録されていないので音声は出ません（TCH の生ビットは残します）。")
+		if name == "auto" && len(Codecs(ch)) == 0 {
+			notes = append(notes, "注意: TCH を読む符号器が 1 つも登録されていないので音声は出ません（TCH の生ビットは残します）。")
 		}
 		return notes, nil
 	}
-	c, ok := voice.Lookup(l1.VoiceChannel, name)
+	c, ok := voice.Lookup(ch, name)
 	if !ok {
-		return nil, fmt.Errorf("知らない符号器 %q（auto / off / %s）", name, CodecNames())
+		return nil, fmt.Errorf("知らない符号器 %q（auto / off / %s）", name, CodecNames(ch))
 	}
 	v, err := c.New(opt)
 	if err != nil {
@@ -109,7 +111,7 @@ func (c *Channel) initVoice() {
 	case "auto":
 		if full := c.std.ledgerCodecOf(c.cfg.MHz); full != "" {
 			name, hint := parseLedgerCodec(full)
-			if cd, ok := voice.Lookup(l1.VoiceChannel, name); ok && !cd.Tentative && (cd.Available == nil || cd.Available()) {
+			if cd, ok := voice.Lookup(c.std.spec.VoiceChannel, name); ok && !cd.Tentative && (cd.Available == nil || cd.Available()) {
 				c.vs.trial = &codecTrial{}
 				if hint != "" {
 					c.vs.hint = name + ":" + hint
@@ -118,7 +120,7 @@ func (c *Channel) initVoice() {
 			}
 		}
 	default:
-		if cd, ok := voice.Lookup(l1.VoiceChannel, c.vs.mode); ok {
+		if cd, ok := voice.Lookup(c.std.spec.VoiceChannel, c.vs.mode); ok {
 			c.setCodec(&cd, "指定")
 		}
 	}
@@ -147,8 +149,9 @@ func (c *Channel) voiceFrame(f decoder.Frame, p l1.Parsed) {
 	if isVoice {
 		c.writeTCH(f.No, p)
 	}
+	vch := c.std.spec.VoiceChannel
 	for h := 0; h < 2; h++ {
-		vf := voice.Frame{Ch: l1.VoiceChannel, No: 2*f.No + int64(h), TimeSec: f.TimeSec + float64(h)*voice.FrameSec, Sub: c.sfPos*2 + h}
+		vf := voice.Frame{Ch: vch, No: 2*f.No + int64(h), TimeSec: f.TimeSec + float64(h)*voice.FrameSec, Sub: c.sub*2 + h}
 		tch := isVoice && p.Half[h].Kind == l1.HalfTCH
 		if tch {
 			vf.Bits, vf.Soft = p.Half[h].TCH, p.Half[h].TCHSoft
@@ -167,7 +170,7 @@ func (c *Channel) pushVoiceGap(f decoder.Frame) {
 		return
 	}
 	for h := 0; h < 2; h++ {
-		c.tx.tr.Push(voice.Frame{Ch: l1.VoiceChannel, No: 2*f.No + int64(h), TimeSec: f.TimeSec + float64(h)*voice.FrameSec}, false)
+		c.tx.tr.Push(voice.Frame{Ch: c.std.spec.VoiceChannel, No: 2*f.No + int64(h), TimeSec: f.TimeSec + float64(h)*voice.FrameSec}, false)
 	}
 }
 
@@ -177,7 +180,7 @@ func (c *Channel) probe(f voice.Frame, tch bool) {
 	}
 	if !c.vs.tried {
 		c.vs.tried = true
-		for _, cd := range Codecs() {
+		for _, cd := range Codecs(c.std.spec.VoiceChannel) {
 			if cd.Tentative || cd.ManualOnly || (cd.Available != nil && !cd.Available()) {
 				continue
 			}
@@ -309,9 +312,7 @@ func (c *Channel) newTracker() *voice.Tracker {
 		for k, v := range opt {
 			o[k] = v
 		}
-		if cc.Name == "ambe" {
-			c.b54VoiceOpt(o)
-		}
+		c.link.VoiceOpt(cc.Name, o)
 		return cc.New(o)
 	}
 	buf := &audioBuf{}
@@ -339,6 +340,12 @@ func (c *Channel) newTracker() *voice.Tracker {
 	tr.OnUnit = func(u voice.Unit, _, _ int64) {
 		if u.Check.Valid {
 			t.rec.VoiceOK += map[bool]int{true: 1, false: 0}[u.Check.OK]
+			c.mu.Lock()
+			c.st.Voice++
+			if u.Check.OK {
+				c.st.VoiceOK++
+			}
+			c.mu.Unlock()
 			if c.vs.trial != nil && t.tr == tr {
 				c.vs.trial.n++
 				if u.Check.OK {

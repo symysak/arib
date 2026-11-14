@@ -3,44 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STD-T102 受信モニタ</title>
+<title>STD-T102（+ STD-B54）受信モニタ</title>
 <link rel="stylesheet" href="./app.css">
 <link rel="stylesheet" href="./lib/leaflet/leaflet.css">
 <link rel="stylesheet" href="./data.css">
+<link rel="stylesheet" href="./nxdn.css">
 </head>
 <body>
 
-<div class="linkbar" id="pane-link" data-title="ARIB STD-T102" data-sub="std-t102 live"></div>
+<div class="linkbar" id="pane-link" data-title="ARIB STD-T102 第 2 編" data-sub="std-t102 live（+ ARIB STD-B54）"></div>
 
 <div class="grid">
-  <section class="card s12" id="pane-stations">
-    <h2>局一覧<span class="sub" id="stations-sub"></span></h2>
-    <div class="body" id="stations-body"></div>
+  <section class="card s12" id="pane-lanes">
+    <h2>局とタイムライン<span class="sub" id="lanes-sub"></span></h2>
+    <div class="body" id="lanes-body"></div>
   </section>
 
-  <section class="card s12" id="pane-timeline">
-    <h2>帯タイムライン<span class="sub" id="timeline-sub"></span></h2>
-    <div class="body" id="timeline-body"></div>
-  </section>
-
-  <section class="card s5" id="pane-detail">
-    <h2>選択局の詳細<span class="sub" id="detail-sub"></span></h2>
-    <div class="body" id="detail-body"></div>
-  </section>
-
-  <section class="card s3" id="pane-eye">
-    <h2>目のパターン<span class="sub">4 値 FSK（±3 / ±1）</span></h2>
-    <div class="body" id="eye-body"></div>
-  </section>
-
-  <section class="card s4" id="pane-audio">
-    <h2>音声<span class="sub" id="audio-sub"></span></h2>
-    <div class="body" id="audio-body"></div>
-  </section>
-
-  <section class="card s12" id="pane-tx">
+  <section class="card s8" id="pane-tx">
     <h2>送信<span class="sub" id="tx-sub"></span></h2>
     <div class="body" id="tx-body"></div>
+  </section>
+
+  <section class="card s4" id="pane-focus">
+    <h2>選んだ送信<span class="sub" id="focus-sub"></span></h2>
+    <div class="body" id="focus-body"></div>
+    <div class="cardsplit" id="pane-audio">
+      <h3>ライブ音声 <span id="audio-sub"></span></h3>
+      <div class="body" id="audio-body"></div>
+    </div>
   </section>
 
   <section class="card s8" id="pane-datamap">
@@ -53,14 +43,14 @@
     <div class="body" id="datamsg-body"></div>
   </section>
 
-  <section class="card s12" id="pane-quality">
-    <h2>品質トレンド<span class="sub" id="quality-sub"></span></h2>
-    <div class="body" id="quality-body"></div>
+  <section class="card s8" id="pane-l1">
+    <h2>フレーム（L1・80 ms）<span class="sub" id="l1-sub"></span></h2>
+    <div class="body" id="l1-body"></div>
   </section>
 
-  <section class="card s12" id="pane-l1">
-    <h2>L1 インスペクタ（フレーム 80 ms）<span class="sub" id="l1-sub"></span></h2>
-    <div class="body" id="l1-body"></div>
+  <section class="card s4" id="pane-detail">
+    <h2>選択局の詳細<span class="sub" id="detail-sub"></span></h2>
+    <div class="body" id="detail-body"></div>
   </section>
 
   <section class="card s12" id="pane-l3">
@@ -68,8 +58,29 @@
     <div class="body" id="l3-body"></div>
   </section>
 
+  <section class="card s4" id="pane-eye">
+    <h2>目のパターン<span class="sub">選択局・4 値 FSK（±3 / ±1）</span></h2>
+    <div class="body" id="eye-body"></div>
+  </section>
+
+  <section class="card s8" id="pane-quality">
+    <h2>品質トレンド<span class="sub" id="quality-sub"></span></h2>
+    <div class="body" id="quality-body"></div>
+  </section>
+
+  <section class="card s12" id="pane-stations">
+    <h2>局の方式（規格・実装・鍵）<span class="sub" id="stations-sub"></span></h2>
+    <div class="body" id="stations-body"></div>
+  </section>
+
+
+  <section class="card s12" id="pane-system">
+    <h2>システム<span class="sub" id="system-sub"></span></h2>
+    <div class="body" id="system-body"></div>
+  </section>
+
   <section class="card s6" id="pane-activity">
-    <h2>録音（送信）<span class="sub" id="activity-sub"></span></h2>
+    <h2>録音<span class="sub" id="activity-sub"></span></h2>
     <div class="body" id="activity-body"></div>
   </section>
 

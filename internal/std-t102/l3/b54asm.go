@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/symysak/arib/internal/nxdn/scramble"
 	"github.com/symysak/arib/internal/sjis"
 )
 
@@ -24,16 +25,7 @@ func CRC32(p []byte) uint32 {
 	return c
 }
 
-func Keystream(key uint16, n int) []uint8 {
-	l := uint32(key) & 0x7FFF
-	out := make([]uint8, n)
-	for i := range out {
-		out[i] = uint8(l & 1)
-		fb := (l ^ l>>1) & 1
-		l = l>>1 | fb<<14
-	}
-	return out
-}
+func Keystream(key uint16, n int) []uint8 { return scramble.Keystream(key, n) }
 
 func Descramble(p []byte, key uint16) []byte {
 	ks := Keystream(key, 8*len(p))

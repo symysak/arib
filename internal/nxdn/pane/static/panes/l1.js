@@ -1,11 +1,11 @@
 import { makeLayerPane, timeCol, freqCol } from './layers.js';
 
 export function init(store) {
-  makeLayerPane(store, {
+  const pane = makeLayerPane(store, {
     pane: 'l1',
-    topic: 't102frames',
+    topic: 'nxdnframes',
     empty: 'この局のフレームはまだありません',
-    items: (s) => s.t102frames.filter((r) => store.inScope(r.idx)),
+    items: (s) => s.nxdnframes.filter((r) => store.inScope(r.idx) && store.inFocus(r)),
     key: (r) => `l1/${r.no}`,
     columns: [
       timeCol,
@@ -20,4 +20,10 @@ export function init(store) {
       tree: r.tree, hex: r.raw_hex,
     }),
   });
+  const sub = document.getElementById('l1-sub');
+  const note = () => { if (sub && store.focusedTx()) sub.textContent += '・選んだ送信だけ（Esc で全部へ）'; };
+  store.on('nxdnfocus', () => { pane.follow(); note(); });
+  store.on('nxdnframes', note);
+  store.on('selection', note);
+  note();
 }

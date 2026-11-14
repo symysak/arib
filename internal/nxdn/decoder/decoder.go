@@ -3,8 +3,8 @@ package decoder
 import (
 	"math"
 
-	"github.com/symysak/arib/internal/std-t102/dsp"
-	"github.com/symysak/arib/internal/std-t102/l1"
+	"github.com/symysak/arib/internal/nxdn/dsp"
+	"github.com/symysak/arib/internal/nxdn/l1"
 )
 
 type Config struct {

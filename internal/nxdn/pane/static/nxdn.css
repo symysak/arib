@@ -1,0 +1,28 @@
+.lanes { display: flex; gap: 8px; align-items: flex-start; }
+.laneleft { flex: 0 0 auto; max-width: 62%; overflow: hidden; display: grid; column-gap: 6px; grid-auto-rows: 22px; }
+.laneheads { display: contents; }
+.laneright { flex: 1 1 0; min-width: 120px; padding-top: 22px; }
+.lanerow {
+  display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
+  align-items: center; height: 22px; padding: 0 2px; box-sizing: border-box;
+  font-size: 11.5px; white-space: nowrap; border-left: 3px solid transparent;
+}
+.lanerow > span { overflow: hidden; text-overflow: ellipsis; }
+.lanerow.lanehead { color: var(--ink-3); font-size: 10.5px; font-weight: 600; border-bottom: 1px solid var(--line); }
+.lanerow.pick { cursor: pointer; }
+.lanerow.pick:hover { background: var(--surface-2); }
+.lanerow.pick.sel { background: var(--accent-soft); border-left-color: var(--accent); font-weight: 600; }
+.lanerow.idle-row { opacity: .55; }
+.txtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.txtable th {
+  text-align: left; font-weight: 600; color: var(--ink-3); font-size: 10.5px; padding: 3px 7px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; background: var(--surface);
+}
+.txtable td { padding: 3px 7px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+.txtable tbody tr { cursor: pointer; }
+.txtable tbody tr:hover td { background: var(--surface-2); }
+.txtable tbody tr.sel td { background: var(--accent-soft); }
+.focusbig { font-size: 21px; font-weight: 700; letter-spacing: .4px; margin-top: 6px; }
+.focusplay { margin-top: 8px; }
+.cardsplit { border-top: 1px solid var(--line-soft); }
+.cardsplit > h3 { margin: 0; padding: 5px 10px 0; font-size: 10.5px; font-weight: 600; color: var(--ink-3); }

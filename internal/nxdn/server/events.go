@@ -2,7 +2,6 @@ package server
 
 import (
 	"github.com/symysak/arib/internal/data"
-	"github.com/symysak/arib/internal/std-t102/l3"
 )
 
 const (
@@ -12,11 +11,11 @@ const (
 	EvLog         = "log"
 	EvMeta        = "meta"
 	EvRec         = "rec"
-	EvFrame       = "t102frame"
-	EvMsg         = "t102msg"
-	EvTx          = "t102tx"
-	EvSignal      = "t102signal"
-	EvEye         = "t102eye"
+	EvFrame       = "nxdnframe"
+	EvMsg         = "nxdnmsg"
+	EvTx          = "nxdntx"
+	EvSignal      = "nxdnsignal"
+	EvEye         = "nxdneye"
 )
 
 type Event struct {
@@ -58,15 +57,26 @@ type FrameRec struct {
 	key    string
 }
 
+type Message struct {
+	Ch   string `json:"ch"`
+	Type int    `json:"type"`
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	Maker int    `json:"maker"`
+	Raw   []byte `json:"raw"`
+	End bool `json:"end,omitempty"`
+}
+
 type MsgRec struct {
-	No     int64      `json:"no"`
-	Idx    int        `json:"idx"`
-	TSec   float64    `json:"t_sec"`
-	Repeat int        `json:"repeat"`
-	Msg    l3.Message `json:"msg"`
-	U      int        `json:"u"`
-	Tree   []Node     `json:"tree"`
-	key    string
+	No     int64   `json:"no"`
+	Idx    int     `json:"idx"`
+	TSec   float64 `json:"t_sec"`
+	Repeat int     `json:"repeat"`
+	Msg    Message `json:"msg"`
+	U      int     `json:"u"`
+	Tree   []Node  `json:"tree"`
+	Key string `json:"-"`
+	Ext any `json:"-"`
 }
 
 type TxRec struct {
@@ -84,11 +94,12 @@ type TxRec struct {
 	VoiceOK int      `json:"voice_ok"`
 	Data    int      `json:"data"`
 	Msgs    []string `json:"msgs"`
-	Call  string `json:"call,omitempty"`
-	Name  string `json:"name,omitempty"`
-	End   string `json:"end,omitempty"`
-	Base  string `json:"base,omitempty"`
-	Audio bool   `json:"audio,omitempty"`
+	Call string `json:"call,omitempty"`
+	Name string `json:"name,omitempty"`
+	Ext   map[string]any `json:"ext,omitempty"`
+	End   string         `json:"end,omitempty"`
+	Base  string         `json:"base,omitempty"`
+	Audio bool           `json:"audio,omitempty"`
 }
 
 type Signal struct {
@@ -161,6 +172,7 @@ type Meta struct {
 	CodecMode  string      `json:"codec_mode"`
 	DataMode   string      `json:"data_mode"`
 	AudioRate  int         `json:"audio_rate"`
+	Ext map[string]any `json:"ext,omitempty"`
 }
 
 type Station struct {
@@ -191,6 +203,8 @@ type Station struct {
 	EVM      float64 `json:"evm"`
 	Txs      int     `json:"txs"`
 	Overflow int     `json:"overflows"`
+	Voice   int `json:"voice"`
+	VoiceOK int `json:"voice_ok"`
 	Caller string `json:"caller,omitempty"`
 	Profile Profile `json:"profile"`
 }
@@ -201,9 +215,9 @@ type Snapshot struct {
 	Stations  []Station         `json:"stations"`
 	Logs      []LogLine         `json:"logs"`
 	Recs      []Rec             `json:"recs"`
-	Frames    []FrameRec        `json:"t102frames"`
-	Msgs      []MsgRec          `json:"t102msgs"`
-	Txs       []TxRec           `json:"t102txs"`
-	Signals   map[string]Signal `json:"t102signals"`
+	Frames    []FrameRec        `json:"nxdnframes"`
+	Msgs      []MsgRec          `json:"nxdnmsgs"`
+	Txs       []TxRec           `json:"nxdntxs"`
+	Signals   map[string]Signal `json:"nxdnsignals"`
 	Ext       map[string]any    `json:"ext"`
 }

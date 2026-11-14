@@ -18,9 +18,9 @@ import (
 	"github.com/symysak/arib/internal/credit"
 	"github.com/symysak/arib/internal/data"
 	"github.com/symysak/arib/internal/iqsrc"
+	"github.com/symysak/arib/internal/nxdn/dsp"
 	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/rx"
-	"github.com/symysak/arib/internal/std-t102/dsp"
 	"github.com/symysak/arib/internal/voice"
 	"github.com/symysak/arib/internal/webui"
 )
@@ -36,7 +36,6 @@ type Config struct {
 	AudioAGC bool
 	AudioTap func(idx int, pcm []int16, rate int)
 	LedgerDir string
-	B54Keys map[int]uint16
 }
 
 const (
@@ -69,7 +68,7 @@ type Monitor struct {
 	audioSeq map[int]int64
 }
 
-func NewMonitor(cfg Config) *Monitor {
+func NewMonitor(spec Spec, cfg Config) *Monitor {
 	ec := cfg.Engine
 	t0, est := timeOrigin(ec.Source)
 	m := &Monitor{cfg: cfg, chans: map[int]*Channel{}, audio: webui.NewHub(), audioSeq: map[int]int64{},
@@ -78,8 +77,8 @@ func NewMonitor(cfg Config) *Monitor {
 	if cfg.Init != nil {
 		init = *cfg.Init
 	}
-	m.std = NewStandard(StdConfig{LogDir: ec.LogDir, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: cfg.Data, Init: init,
-		Opts: cfg.Opts, Lossless: !iqsrc.IsNetwork(ec.Source), NoTCH: cfg.NoTCH, AudioAGC: cfg.AudioAGC, B54Keys: cfg.B54Keys})
+	m.std = NewStandard(spec, StdConfig{LogDir: ec.LogDir, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: cfg.Data, Init: init,
+		Opts: cfg.Opts, Lossless: !iqsrc.IsNetwork(ec.Source), NoTCH: cfg.NoTCH, AudioAGC: cfg.AudioAGC})
 	m.std.audio = m.onAudio
 	m.std.hooks = &stdHooks{opened: m.opened, closed: m.closed}
 	chans := append([]float64{}, ec.Channels...)
@@ -88,14 +87,17 @@ func NewMonitor(cfg Config) *Monitor {
 	if dataMode == "" {
 		dataMode = data.Auto
 	}
+	if spec.DataChannel == "" {
+		dataMode = "off"
+	}
 	m.meta = Meta{
 		Input: ec.Source, CenterMHz: ec.CenterHz / 1e6, SampleRate: ec.SampleRate, GainDB: ec.GainDB,
 		Channels: chans, LogDir: ec.LogDir, T0WallMS: t0.UnixMilli(), Estimated: est,
 		Network: iqsrc.IsNetwork(ec.Source), Scan: ec.Scan.Enabled,
-		System:     "ARIB STD-T102 第 2 編（狭帯域デジタル通信方式 SCPC/4 値 FSK。2400 シンボル/s・6.25 kHz 間隔・80 ms フレーム）",
-		SymbolRate: dsp.SymbolRate, Codecs: CodecNames(), CodecMode: cfg.Codec, DataMode: dataMode, AudioRate: voice.SampleRate,
+		System: spec.Title, Ext: spec.Meta,
+		SymbolRate: dsp.SymbolRate, Codecs: CodecNames(spec.VoiceChannel), CodecMode: cfg.Codec, DataMode: dataMode, AudioRate: voice.SampleRate,
 	}
-	ec.System = System
+	ec.System = spec.System
 	ec.TimeOrigin = t0
 	ec.OnStart = m.onStart
 	ec.OnEmit = m.onEmit
@@ -118,12 +120,11 @@ func NewMonitor(cfg Config) *Monitor {
 	}
 	m.eng = rx.NewWide(m.std, ec)
 	for i := 0; i < m.eng.NumInputs(); i++ {
-		in := m.eng.Input(i).Status()
-		m.meta.Inputs = append(m.meta.Inputs, InputMeta{ID: fmt.Sprintf("in%d", i), Label: m.eng.InputLabel(i), Input: in.Input,
-			CenterMHz: in.CenterHz / 1e6, SampleRate: in.SampleRate, GainDB: in.GainDB, AGC: in.AGC})
+		m.meta.Inputs = append(m.meta.Inputs, InputMeta{ID: fmt.Sprintf("in%d", i), Label: m.eng.InputLabel(i)})
 	}
+	m.refreshInputs()
 	m.w = webui.New(webui.Config{
-		Panes:    []fs.FS{m.std.Pane()},
+		Panes:    append(append([]fs.FS{}, spec.Panes...), m.std.Pane()),
 		Snapshot: func() any { s := m.Snapshot(); return Event{Type: EvSnapshot, Idx: -1, Snapshot: &s} },
 		Status:   func() any { return m.Snapshot() },
 		FileDir:  func() string { return ec.LogDir },
@@ -146,6 +147,14 @@ func NewMonitor(cfg Config) *Monitor {
 		m.addLog("info", "system", "%s", n)
 	}
 	return m
+}
+
+func (m *Monitor) refreshInputs() {
+	for i := range m.meta.Inputs {
+		in := m.eng.Input(i).Status()
+		mi := &m.meta.Inputs[i]
+		mi.Input, mi.CenterMHz, mi.SampleRate, mi.GainDB, mi.AGC = in.Input, in.CenterHz/1e6, in.SampleRate, in.GainDB, in.AGC
+	}
 }
 
 func (m *Monitor) Handler() http.Handler { return m.w }
@@ -204,6 +213,7 @@ func (m *Monitor) Snapshot() Snapshot {
 	for _, c := range m.chans {
 		chans = append(chans, c)
 	}
+	m.refreshInputs()
 	s := Snapshot{Generator: credit.Generator, Meta: m.meta, Logs: append([]LogLine{}, m.logs...), Recs: append([]Rec{}, m.recs...),
 		Frames: append([]FrameRec{}, m.frames...), Msgs: append([]MsgRec{}, m.msgs...), Txs: append([]TxRec{}, m.txs...),
 		Signals: map[string]Signal{}, Ext: map[string]any{}, Stations: []Station{}}
@@ -330,8 +340,8 @@ func (m *Monitor) opened(c *Channel) {
 	}
 	m.w.Publish(Event{Type: EvMeta, Idx: -1, Meta: &meta})
 	init := "当てる"
-	if c.opt.Init >= 0 {
-		init = fmt.Sprintf("0x%03X（指定）", c.opt.Init)
+	if v, ok := c.keyer.Init(); ok && c.keyer.Fixed() {
+		init = fmt.Sprintf("0x%03X（%s）", v, c.keyer.Why())
 	}
 	m.addLogFor(c.ID(), "info", "system", "%.5f MHz の監視を始めた（オフセット %+.1f kHz・ホワイトニングの初期値 %s）", c.MHz(), c.cfg.OffHz/1e3, init)
 }
@@ -388,6 +398,7 @@ func (m *Monitor) addLogFor(idx int, level, group, format string, a ...any) {
 func (m *Monitor) setMeta(f func(*Meta)) {
 	m.mu.Lock()
 	f(&m.meta)
+	m.refreshInputs()
 	meta := m.meta
 	m.mu.Unlock()
 	m.w.Publish(Event{Type: EvMeta, Idx: -1, Meta: &meta})
@@ -448,4 +459,27 @@ func timeOrigin(src string) (time.Time, bool) {
 		return st.ModTime(), true
 	}
 	return time.Now(), true
+}
+
+type LockState struct {
+	MHz   float64
+	Lock  bool
+	Score float64
+	Label string
+}
+
+func (m *Monitor) Locks() []LockState {
+	m.mu.Lock()
+	chans := make([]*Channel, 0, len(m.chans))
+	for _, c := range m.chans {
+		chans = append(chans, c)
+	}
+	m.mu.Unlock()
+	sort.Slice(chans, func(i, j int) bool { return chans[i].ID() < chans[j].ID() })
+	out := make([]LockState, 0, len(chans))
+	for _, c := range chans {
+		lock, score, label := c.Lock()
+		out = append(out, LockState{MHz: c.MHz(), Lock: lock, Score: score, Label: label})
+	}
+	return out
 }

@@ -8,6 +8,7 @@ const SPAN_SEC = 300;
 const LANES = [
   { key: 'richPct', name: 'RICH が規定どおり [%]', min: 0, max: 100, color: () => COLOR.ok() },
   { key: 'crcPct', name: '機能チャネルの CRC 一致 [%]', min: 0, max: 100, color: () => COLOR.ink() },
+  { key: 'voicePct', name: '音声の符号器の検査 [%]', min: 0, max: 100, color: () => '#c98a2b' },
   { key: 'level', name: '信号レベル [dB]', min: -90, max: 0, color: () => COLOR.accent() },
   { key: 'dev', name: '±1 の偏位 [Hz]（規格 315）', min: 0, max: 600, color: () => COLOR.data() },
   { key: 'dc', name: '直流（搬送波のずれ）[Hz]', min: -2000, max: 2000, color: () => COLOR.crit() },
@@ -20,7 +21,9 @@ function rates(pts) {
     const df = b.frames - a.frames;
     if (df <= 0) continue;
     const dc = b.crcAll - a.crcAll;
+    const dv = (b.voice || 0) - (a.voice || 0);
     out.push({ t: b.t, richPct: (100 * (b.richOK - a.richOK)) / df, crcPct: dc > 0 ? (100 * (b.crcOK - a.crcOK)) / dc : null,
+      voicePct: dv > 0 ? (100 * ((b.voiceOK || 0) - (a.voiceOK || 0))) / dv : null,
       level: b.level, dev: b.dev, dc: b.dc });
   }
   return out;
@@ -30,7 +33,7 @@ export function init(store) {
   const body = document.getElementById('quality-body');
   const sub = document.getElementById('quality-sub');
   const cv = document.createElement('canvas');
-  cv.style.cssText = 'width:100%;height:270px;display:block';
+  cv.style.cssText = 'width:100%;height:320px;display:block';
   body.appendChild(cv);
 
   function draw() {

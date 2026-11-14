@@ -11,8 +11,9 @@ import (
 	"github.com/symysak/arib/internal/credit"
 	"github.com/symysak/arib/internal/data"
 	"github.com/symysak/arib/internal/iqsrc"
+	"github.com/symysak/arib/internal/nxdn/decoder"
+	nxl1 "github.com/symysak/arib/internal/nxdn/l1"
 	"github.com/symysak/arib/internal/std-t102/cli"
-	"github.com/symysak/arib/internal/std-t102/decoder"
 	"github.com/symysak/arib/internal/std-t102/l1"
 	"github.com/symysak/arib/internal/std-t102/l3"
 	"github.com/symysak/arib/internal/std-t102/server"
@@ -126,7 +127,7 @@ func run(argv []string) int {
 }
 
 type printer struct {
-	keyer      *l1.Keyer
+	keyer      *nxl1.Keyer
 	pend       []decoder.Frame
 	sacch      l3.SACCH
 	data       *data.Station
@@ -143,7 +144,7 @@ type printer struct {
 }
 
 func newPrinter(fixed int, dataFmt string, quiet, all bool) *printer {
-	return &printer{keyer: l1.NewKeyer(fixed, server.DefaultInits...), data: data.NewStation(l1.DataChannel, dataFmt),
+	return &printer{keyer: nxl1.NewKeyer(nxl1.KeyerConfig{Dialect: l1.Dialect, Fixed: fixed, Hints: server.DefaultInits}), data: data.NewStation(l1.DataChannel, dataFmt),
 		quiet: quiet, all: all, init: -1}
 }
 
@@ -178,10 +179,10 @@ func (p *printer) frame(f decoder.Frame) {
 	}
 }
 
-func (p *printer) keyed(f decoder.Frame, kd l1.Keyed) {
+func (p *printer) keyed(f decoder.Frame, kd nxl1.Keyed) {
 	ps := kd.Parsed
-	r := ps.RICH
-	if r.Valid() {
+	r := l1.ReadRICH(ps.RICH)
+	if ps.Layout.Valid {
 		p.rich++
 	}
 	line := fmt.Sprintf("FSW誤り %d RICH %s", f.FSWErr, r)
@@ -196,8 +197,9 @@ func (p *printer) keyed(f decoder.Frame, kd l1.Keyed) {
 		p.crcAll++
 		if s.CRCOK {
 			p.crc++
-			line += fmt.Sprintf(" | SACCH S=%02b U=%d", s.S, s.U)
-			if b, ok := p.sacch.Push(r.Superframe(), s.S, s.U, s.Data[:]); ok {
+			ss, u := l1.SU(s.Head)
+			line += fmt.Sprintf(" | SACCH S=%02b U=%d", ss, u)
+			if b, ok := p.sacch.Push(r.Superframe(), ss, u, s.Data[:]); ok {
 				if !r.Superframe() {
 					b = b[:2]
 				}
@@ -210,11 +212,11 @@ func (p *printer) keyed(f decoder.Frame, kd l1.Keyed) {
 	}
 	for i, h := range ps.Half {
 		switch {
-		case h.FACCH1 != nil:
+		case h.Coded != nil:
 			p.crcAll++
-			if h.FACCH1.CRCOK {
+			if h.Coded.CRCOK {
 				p.crc++
-				b := l1.FACCH1Bytes(h.FACCH1)
+				b := nxl1.CodedBytes(h.Coded)
 				line += fmt.Sprintf(" | FACCH1 % X", b)
 				if i == 0 || len(out) == 0 {
 					msg("FACCH1", l3.Parse("FACCH1", b[:]))
@@ -222,29 +224,31 @@ func (p *printer) keyed(f decoder.Frame, kd l1.Keyed) {
 			} else {
 				line += " | FACCH1 CRC誤り"
 			}
-		case h.Kind == l1.HalfTCH && h.TCH != nil:
+		case h.Kind == nxl1.HalfTCH && h.TCH != nil:
 			line += " | TCH"
 		}
 	}
 	if dd := ps.Data; dd != nil {
 		p.crcAll++
+		kind := r.DataKind()
+		_, u := l1.SU(dd.Head)
 		if dd.CRCOK {
 			p.crc++
-			line += fmt.Sprintf(" | %s U=%d % X", dd.Kind, dd.U, dd.Body)
-			if m := l3.Parse(dd.Kind.String(), dd.Body[:]); dd.Kind == l1.DataFACCH2 || m.B54 != nil {
-				msg(dd.Kind.String(), m)
+			line += fmt.Sprintf(" | %s U=%d % X", kind, u, dd.Body)
+			if m := l3.Parse(kind.String(), dd.Body[:]); kind == nxl1.DataFACCH2 || m.B54 != nil {
+				msg(kind.String(), m)
 			}
-			bits := append(l1.SACCHInfo(dd.S, dd.U, make([]uint8, 18))[:8], l1.BytesToBits(dd.Body[:])...)
-			for _, ev := range p.data.Read(data.Frame{Ch: l1.DataChannel, No: f.No, TimeSec: f.TimeSec, Bits: bits, Route: dd.Kind.String()}) {
+			bits := append(nxl1.HeadInfo(dd.Head, make([]uint8, 18))[:8], nxl1.BytesToBits(dd.Body[:])...)
+			for _, ev := range p.data.Read(data.Frame{Ch: l1.DataChannel, No: f.No, TimeSec: f.TimeSec, Bits: bits, Route: kind.String()}) {
 				out = append(out, "データ "+ev.Label)
 			}
 		} else {
-			line += " | " + dd.Kind.String() + " CRC誤り"
+			line += " | " + kind.String() + " CRC誤り"
 		}
 	}
 	if !p.quiet {
 		key := line
-		if ps.Format == l1.FormatVoice {
+		if ps.Format == nxl1.FormatVoice {
 			key = fmt.Sprintf("%s|%v", line, len(out))
 		}
 		if !p.all && key == p.last && len(out) == 0 {

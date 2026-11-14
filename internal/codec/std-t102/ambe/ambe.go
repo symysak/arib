@@ -2,15 +2,12 @@ package ambe
 
 import (
 	"fmt"
-	"math"
-	"math/bits"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 
+	"github.com/symysak/arib/internal/nxdn/scramble"
 	"github.com/symysak/arib/internal/std-t102/l1"
-	"github.com/symysak/arib/internal/std-t102/l3"
 	"github.com/symysak/arib/internal/vocoder/ambe"
 	"github.com/symysak/arib/internal/vocoder/ambe2-c"
 	"github.com/symysak/arib/internal/voice"
@@ -99,26 +96,6 @@ func near(a [ambe.Bits3600]uint8) bool {
 	return c0+c1 <= nearMax
 }
 
-func descramble(a [ambe.Bits3600]uint8, mask []uint8) [ambe.Bits3600]uint8 {
-	d := ambe.Params49(a)
-	for i := 0; i < 49 && i < len(mask); i++ {
-		d[i] ^= mask[i] & 1
-	}
-	return ambe.FromParams49(d)
-}
-
-const (
-	keyMinUnits = 10
-	keyMaxUnits = 250
-	keyZ = 6
-	keyGain = 0.9
-)
-
-type pair struct {
-	x      uint64
-	pa, pb int
-}
-
 type Voice struct {
 	stream *ambe2c.Stream
 	key    atomic.Uint32
@@ -129,7 +106,7 @@ type Voice struct {
 	decided bool
 	units   int
 	next    int
-	pairs   []pair
+	pairs   []scramble.Pair
 	prevOK  bool
 	prevNo  int64
 	prevD   uint64
@@ -185,24 +162,24 @@ func (v *Voice) observe(no int64, u unit, ok bool) bool {
 	}
 	var d [2]uint64
 	for k := 0; k < 2; k++ {
-		d[k] = pack49(ambe.Params49(u.f[k]))
+		d[k] = scramble.Pack49(ambe.Params49(u.f[k]))
 	}
 	pos := u.sub * 2
 	if v.prevOK && no == v.prevNo+1 {
-		v.pairs = append(v.pairs, pair{x: v.prevD ^ d[0], pa: v.prevPos, pb: pos})
+		v.pairs = append(v.pairs, scramble.Pair{X: v.prevD ^ d[0], PA: v.prevPos, PB: pos})
 	}
-	v.pairs = append(v.pairs, pair{x: d[0] ^ d[1], pa: pos, pb: pos + 1})
+	v.pairs = append(v.pairs, scramble.Pair{X: d[0] ^ d[1], PA: pos, PB: pos + 1})
 	v.prevOK, v.prevNo, v.prevD, v.prevPos = true, no, d[1], pos+1
 	v.units++
 	if v.next == 0 {
-		v.next = keyMinUnits
+		v.next = scramble.KeyMinUnits
 	}
 	if v.units < v.next {
 		return false
 	}
-	v.next = max(v.units+1, min(v.units+max(5, v.units/4), keyMaxUnits))
-	key, sf, ok := findKey(v.pairs)
-	if !ok && v.units < keyMaxUnits {
+	v.next = max(v.units+1, min(v.units+max(5, v.units/4), scramble.KeyMaxUnits))
+	key, sf, ok := scramble.FindKey(v.pairs)
+	if !ok && v.units < scramble.KeyMaxUnits {
 		return false
 	}
 	v.decided = true
@@ -211,93 +188,6 @@ func (v *Voice) observe(no int64, u unit, ok bool) bool {
 		v.key.Store(uint32(key) | sfBit(sf && key != 0))
 	}
 	return ok
-}
-
-func findKey(ps []pair) (uint16, bool, bool) {
-	if len(ps) == 0 {
-		return 0, false, false
-	}
-	base := 0
-	sfPos := false
-	for _, p := range ps {
-		base += bits.OnesCount64(p.x)
-		sfPos = sfPos || p.pa >= 4 || p.pb >= 4
-	}
-	type cand struct {
-		key            uint16
-		best           int
-		mean, sd       float64
-		pick, plainWin bool
-	}
-	scan := func(mask func(key uint16, pos int) uint64) cand {
-		best, bestKey := math.MaxInt, uint16(0)
-		var sum, sq float64
-		for key := uint16(1); key <= 0x7FFF; key++ {
-			c := 0
-			for _, p := range ps {
-				c += bits.OnesCount64(p.x ^ mask(key, p.pa) ^ mask(key, p.pb))
-			}
-			sum += float64(c)
-			sq += float64(c) * float64(c)
-			if c < best {
-				best, bestKey = c, key
-			}
-		}
-		mean := sum / 0x7FFF
-		sd := math.Sqrt(max(sq/0x7FFF-mean*mean, 1e-9))
-		return cand{key: bestKey, best: best, mean: mean, sd: sd,
-			pick:     float64(best) <= mean-keyZ*sd && float64(best) <= keyGain*float64(base),
-			plainWin: float64(base) <= mean-keyZ*sd && base <= best}
-	}
-	frame := maskTable()
-	nx := scan(func(key uint16, pos int) uint64 { return frame[key][pos&3] })
-	sf := cand{best: math.MaxInt, plainWin: true}
-	if sfPos {
-		tab := maskTableSF()
-		sf = scan(func(key uint16, pos int) uint64 { return tab[key][pos] })
-	}
-	switch {
-	case nx.pick && (!sf.pick || nx.best <= sf.best):
-		return nx.key, false, true
-	case sf.pick:
-		return sf.key, true, true
-	case nx.plainWin && sf.plainWin:
-		return 0, false, true
-	}
-	return 0, false, false
-}
-
-var maskTable = sync.OnceValue(func() *[0x8000][4]uint64 {
-	t := new([0x8000][4]uint64)
-	for key := 1; key < 0x8000; key++ {
-		ks := l3.Keystream(uint16(key), 4*49)
-		for p := 0; p < 4; p++ {
-			for i := 0; i < 49; i++ {
-				t[key][p] |= uint64(ks[49*p+i]&1) << i
-			}
-		}
-	}
-	return t
-})
-
-var maskTableSF = sync.OnceValue(func() *[0x8000][16]uint64 {
-	t := new([0x8000][16]uint64)
-	for key := 1; key < 0x8000; key++ {
-		ks := l3.Keystream(uint16(key), 16*49)
-		for p := 0; p < 16; p++ {
-			for i := 0; i < 49; i++ {
-				t[key][p] |= uint64(ks[49*p+i]&1) << i
-			}
-		}
-	}
-	return t
-})
-
-func pack49(d [49]uint8) (x uint64) {
-	for i := 0; i < 49; i++ {
-		x |= uint64(d[i]&1) << i
-	}
-	return
 }
 
 func (v *Voice) Erase() (voice.Unit, bool) {
@@ -320,7 +210,7 @@ func (v *Voice) Decode(u voice.Unit) ([]int16, error) {
 	full := v.key.Load()
 	key := full & 0x7FFF
 	if key != 0 && full != v.maskKey {
-		ks := l3.Keystream(uint16(key), 16*49)
+		ks := scramble.Keystream(uint16(key), 16*49)
 		for p := 0; p < 16; p++ {
 			q := p
 			if full&keySF == 0 {
@@ -342,7 +232,7 @@ func (v *Voice) Decode(u voice.Unit) ([]int16, error) {
 			if full&keySF == 0 {
 				pos = (d.sub&1)*2 + k
 			}
-			f := descramble(d.f[k], v.masks[pos])
+			f := scramble.Descramble(d.f[k], v.masks[pos])
 			pcm, err = v.stream.Push(f[:])
 		default:
 			pcm, err = v.stream.Push(d.f[k][:])

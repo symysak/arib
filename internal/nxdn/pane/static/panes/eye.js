@@ -18,7 +18,7 @@ export function init(store) {
 
   function drawEye() {
     const { g, w, h } = fit(cv);
-    const eyes = store.state.t102eyes;
+    const eyes = store.state.nxdneyes;
     if (drawn > eyes.length) drawn = 0;
     if (drawn === 0) clear(g, w, h);
     else fade(g, w, h, 0.25);
@@ -52,7 +52,7 @@ export function init(store) {
     const { g, w, h } = fit(hv);
     clear(g, w, h);
     const st = store.selectedStation();
-    const sig = st && store.state.t102signals[String(st.idx)];
+    const sig = st && store.state.nxdnsignals[String(st.idx)];
     if (!sig || !sig.hist) { info.textContent = '記号の分布: まだ'; return; }
     const hist = sig.hist;
     const mx = Math.max(1, ...hist);
@@ -70,7 +70,7 @@ export function init(store) {
     info.textContent = `偏位 ±1 = ${sig.dev_hz.toFixed(0)} Hz・直流 ${sig.dc_hz.toFixed(0)} Hz・EVM ${sig.evm.toFixed(3)}・同期ワードの誤り ${sig.fsw_err.toFixed(2)}`;
   }
 
-  store.on('t102eye', drawEye);
+  store.on('nxdneye', drawEye);
   store.on('selection', () => { drawn = 0; drawEye(); drawHist(); });
   setInterval(drawHist, UI_TICK_MS * 2);
   drawEye();

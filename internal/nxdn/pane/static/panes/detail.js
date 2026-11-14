@@ -37,7 +37,7 @@ export function init(store) {
   function draw() {
     const st = store.selectedStation();
     if (!st) { setText(sub, '-'); for (const k of Object.keys(cells)) setText(cells[k], '-'); return; }
-    const sig = store.state.t102signals[String(st.idx)];
+    const sig = store.state.nxdnsignals[String(st.idx)];
     setText(sub, `${st.mhz.toFixed(4)} MHz`);
     setText(cells.freq, `${st.mhz.toFixed(5)} MHz（オフセット ${(st.offset_hz / 1e3).toFixed(1)} kHz）`);
     setText(cells.sync, st.synced ? '同期中' : (st.watched ? '待機（電波なし）' : '監視終了'));

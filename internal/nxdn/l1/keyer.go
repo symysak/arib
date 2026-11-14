@@ -11,7 +11,17 @@ const (
 	keyLoseAfter = 25
 )
 
+type KeyerConfig struct {
+	Dialect Dialect
+	Fixed    int
+	FixedWhy string
+	Hints []int
+	Candidates []int
+}
+
 type Keyer struct {
+	dialect  Dialect
+	cand     [WhiteningInits]bool
 	init     int
 	fixed    bool
 	hints    []int
@@ -23,8 +33,8 @@ type Keyer struct {
 	richMask [WhiteningInits]uint8
 }
 
-func NewKeyer(fixed int, hints ...int) *Keyer {
-	k := &Keyer{init: -1}
+func NewKeyer(cfg KeyerConfig) *Keyer {
+	k := &Keyer{init: -1, dialect: cfg.Dialect}
 	for i := 0; i < WhiteningInits; i++ {
 		pn := Whitening(i, 8)
 		var m uint8
@@ -32,13 +42,23 @@ func NewKeyer(fixed int, hints ...int) *Keyer {
 			m |= b << (7 - j)
 		}
 		k.richMask[i] = m
+		k.cand[i] = cfg.Candidates == nil
 	}
-	if fixed >= 0 {
-		k.init, k.fixed, k.decided, k.lastWhy = fixed&0x1FF, true, true, "指定"
+	for _, c := range cfg.Candidates {
+		if c >= 0 && c < WhiteningInits {
+			k.cand[c] = true
+		}
+	}
+	if cfg.Fixed >= 0 {
+		why := cfg.FixedWhy
+		if why == "" {
+			why = "指定"
+		}
+		k.init, k.fixed, k.decided, k.lastWhy = cfg.Fixed&0x1FF, true, true, why
 	}
 	seen := map[int]bool{}
-	for _, h := range hints {
-		if h >= 0 && h < WhiteningInits && !seen[h] {
+	for _, h := range cfg.Hints {
+		if h >= 0 && h < WhiteningInits && k.cand[h] && !seen[h] {
 			k.hints = append(k.hints, h)
 			seen[h] = true
 		}
@@ -61,7 +81,7 @@ type Keyed struct {
 func (k *Keyer) Push(body []float32) []Keyed {
 	if k.init >= 0 {
 		kd := k.read(body, k.init)
-		if kd.Parsed.RICH.Valid() {
+		if kd.Parsed.Layout.Valid {
 			k.bad = 0
 		} else if k.bad++; !k.fixed && k.bad >= keyLoseAfter {
 			k.init, k.decided, k.bad, k.lastWhy = -1, false, 0, ""
@@ -89,7 +109,7 @@ func (k *Keyer) Push(body []float32) []Keyed {
 
 func (k *Keyer) read(body []float32, init int) Keyed {
 	d := Dewhiten(body, init)
-	return Keyed{Init: init, Body: d, Parsed: Parse(d)}
+	return Keyed{Init: init, Body: d, Parsed: Parse(d, k.dialect)}
 }
 
 func richRaw(body []float32) uint8 {
@@ -106,12 +126,10 @@ func richRaw(body []float32) uint8 {
 func (k *Keyer) learn(body []float32) {
 	raw := richRaw(body)
 	for i := 0; i < WhiteningInits; i++ {
-		r := raw ^ k.richMask[i]
-		rich := RICH{F: r >> 6, M: r >> 4 & 3, O: r >> 2 & 3, D: r >> 1 & 1, P: r & 1, Raw: r}
-		if !rich.Valid() {
+		if !k.cand[i] || !k.dialect(raw^k.richMask[i]).Valid {
 			continue
 		}
-		k.score[i] += Score(Parse(Dewhiten(body, i)))
+		k.score[i] += Score(Parse(Dewhiten(body, i), k.dialect))
 	}
 }
 
@@ -122,7 +140,7 @@ func Score(p Parsed) int {
 	}
 	for _, h := range p.Half {
 		switch {
-		case h.FACCH1 != nil && h.FACCH1.CRCOK:
+		case h.Coded != nil && h.Coded.CRCOK:
 			s += 4
 		case h.Kind == HalfTCH && len(h.TCH) == TCHBits:
 			for j := 0; j < 2; j++ {

@@ -13,21 +13,17 @@ import (
 	"time"
 
 	"github.com/symysak/arib/internal/cliflag"
+	"github.com/symysak/arib/internal/nxdn/dsp"
+	"github.com/symysak/arib/internal/nxdn/l1"
+	"github.com/symysak/arib/internal/nxdn/pane"
 	"github.com/symysak/arib/internal/rx"
-	"github.com/symysak/arib/internal/std-t102/dsp"
-	"github.com/symysak/arib/internal/std-t102/pane"
 	"github.com/symysak/arib/internal/voice"
 )
 
-const System = "std-t102"
-
 const GridHz = dsp.ChannelSpacing
 
-var DefaultInits = []int{0x0E4}
-
-func AddDefaultInits(v ...int) { DefaultInits = append(append([]int(nil), v...), DefaultInits...) }
-
 type Standard struct {
+	spec  Spec
 	cfg   StdConfig
 	hooks *stdHooks
 	audio func(idx int, pcm []int16, rate int)
@@ -53,7 +49,6 @@ type StdConfig struct {
 	Lossless bool
 	NoTCH bool
 	AudioAGC bool
-	B54Keys map[int]uint16
 }
 
 type ChannelOpt struct {
@@ -87,13 +82,46 @@ func (k *keyBoard) list() []int {
 	return append([]int(nil), k.seen...)
 }
 
-func NewStandard(cfg StdConfig) *Standard {
-	s := &Standard{cfg: cfg}
+func NewStandard(spec Spec, cfg StdConfig) *Standard {
+	s := &Standard{spec: spec, cfg: cfg}
 	s.selected.Store(-1)
 	return s
 }
 
-func (*Standard) Name() string { return "STD-T102" }
+func (s *Standard) Name() string { return s.spec.Name }
+
+func (s *Standard) Spec() Spec { return s.spec }
+
+func (s *Standard) inits() []int {
+	out := s.keys.list()
+	if s.spec.Inits != nil {
+		out = append(out, s.spec.Inits()...)
+	}
+	return out
+}
+
+func (s *Standard) defaultInit(init int) bool {
+	if s.spec.Init != nil && *s.spec.Init == init {
+		return true
+	}
+	if s.spec.Inits == nil {
+		return false
+	}
+	for _, v := range s.spec.Inits() {
+		if v == init {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Standard) keyer(fixed int) *l1.Keyer {
+	cfg := l1.KeyerConfig{Dialect: s.spec.Dialect, Fixed: fixed, Hints: s.inits(), Candidates: s.spec.Candidates}
+	if fixed < 0 && s.spec.Init != nil {
+		cfg.Fixed, cfg.FixedWhy = *s.spec.Init, s.spec.InitWhy
+	}
+	return l1.NewKeyer(cfg)
+}
 
 func (*Standard) Grid() float64 { return GridHz }
 
@@ -129,7 +157,7 @@ func ParseInit(s string) (int, error) {
 	s = strings.TrimSpace(s)
 	v, err := strconv.ParseInt(s, 0, 32)
 	if err != nil || v < 0 || v > 0x1FF {
-		return 0, fmt.Errorf("ホワイトニングの初期値 %q は 0〜511（16 進なら 0x 付き。§4.1.13 の S8…S0）", s)
+		return 0, fmt.Errorf("ホワイトニングの初期値 %q は 0〜511（16 進なら 0x 付き。PN(9,5) の S8…S0）", s)
 	}
 	return int(v), nil
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/symysak/arib/internal/data"
+	nx "github.com/symysak/arib/internal/nxdn/server"
 	"github.com/symysak/arib/internal/std-t102/l3"
 )
 
@@ -35,42 +36,41 @@ func ParseB54Keys(list []string) (map[int]uint16, error) {
 	return out, nil
 }
 
-func (c *Channel) b54Msgs(t float64, msgs []MsgRec) {
+func (k *link) b54Msgs(t float64, msgs []nx.MsgRec) {
 	for _, m := range msgs {
-		x := m.Msg.B54
+		lm, _ := m.Ext.(l3.Message)
+		x := lm.B54
 		if x == nil {
 			continue
 		}
-		if call := x.CallText(); call != "" && c.tx != nil {
-			if x.Type == l3.TypeSelVoice || x.Type == l3.TypeGPSHeader || x.Type == l3.TypeBearerHeader || x.Type == l3.TypeMsgHeader ||
-				x.Type == l3.TypeStatusReq || c.tx.rec.Call == "" {
-				if c.tx.rec.Call != call {
-					c.tx.rec.Call = call
-					c.emitTx()
+		if call := x.CallText(); call != "" {
+			k.h.Tx(func(tx *TxRec) bool {
+				if x.Type == l3.TypeSelVoice {
+					k.b54Call = x
 				}
-			}
-			if x.Type == l3.TypeSelVoice {
-				c.tx.b54Call = x
-			}
+				if x.Type == l3.TypeSelVoice || x.Type == l3.TypeGPSHeader || x.Type == l3.TypeBearerHeader || x.Type == l3.TypeMsgHeader ||
+					x.Type == l3.TypeStatusReq || tx.Call == "" {
+					if tx.Call != call {
+						tx.Call = call
+						return true
+					}
+				}
+				return false
+			})
 		}
-		c.b54Events(t, c.b54.Push(m.Msg))
+		k.b54Events(t, k.b54.Push(lm))
 	}
 }
 
-func (c *Channel) b54Events(t float64, evs []l3.B54Event) {
+func (k *link) b54Events(t float64, evs []l3.B54Event) {
 	for _, e := range evs {
-		c.note("b54 " + e.Label())
+		k.h.Note("b54 " + e.Label())
 		switch e.Kind {
 		case "name":
-			if c.tx != nil {
-				c.tx.rec.Name = e.Name
-				c.emitTx()
-			}
-			c.mu.Lock()
-			c.st.Caller = e.Name
-			c.mu.Unlock()
-			c.logf("call", "info", "発信者名「%s」", e.Name)
-			c.publish(true)
+			k.h.Tx(func(tx *TxRec) bool { tx.Name = e.Name; return true })
+			k.h.EditStation(func(st *Station) { st.Caller = e.Name }, false)
+			k.h.Logf("call", "info", "発信者名「%s」", e.Name)
+			k.h.EditStation(func(*Station) {}, true)
 			continue
 		case "message":
 			if e.Command != 0x83 && e.Command != 0x84 && !e.KeyUnknown {
@@ -90,21 +90,21 @@ func (c *Channel) b54Events(t float64, evs []l3.B54Event) {
 				ev.Pos = &data.Position{Lat: g.Lat, Lon: g.Lon, Heading: -1}
 			}
 		}
-		c.emitData(&DataEvent{Idx: c.cfg.ID, MHz: c.cfg.MHz, Event: ev})
+		k.h.EmitData(ev)
 	}
 }
 
-func (c *Channel) b54VoiceOpt(opt map[string]string) {
-	if _, set := opt["scramble"]; set || c.tx == nil || c.tx.b54Call == nil {
+func (k *link) VoiceOpt(codec string, opt map[string]string) {
+	if _, set := opt["scramble"]; codec != "ambe" || set || k.b54Call == nil {
 		return
 	}
-	x := c.tx.b54Call
+	x := k.b54Call
 	switch x.Enc {
 	case 0:
 		opt["scramble"] = "off"
 		delete(opt, "hint")
 	case 1:
-		if key, ok := c.b54.KeyFor(x.KeyNo); ok {
+		if key, ok := k.b54.KeyFor(x.KeyNo); ok {
 			opt["scramble"] = fmt.Sprintf("%d/sf", key)
 			delete(opt, "hint")
 		}
