@@ -21,11 +21,18 @@ ARIB 標準規格のデジタル無線の受信処理を実装した検証用・
 | STD-T115 QPSK ナロー方式 | 市町村デジタル同報通信システム（60MHz 帯、QPSK） | `std-t115-qpsknarrow` | AMR-WB+ |
 | STD-T79 TYPE1 | 都道府県・市町村デジタル移動通信システム（260MHz 帯） | `std-t79` | AMBE+ 4000/2400 の網だけ |
 | STD-T61 SCPC/FDMA | 狭帯域デジタル通信方式 | `std-t61` | 第 1 編 付録 1 の AMBE+ 2000・AMBE+2 3600x2450 の網と、FDMA 編の TCH から位置を指定して取り出す AMBE+2。ほかの網はレイヤ 1〜3 まで |
-| STD-T102 第 2 編 | 狭帯域デジタル通信方式（SCPC/4 値 FSK）と、その上の STD-B54 | `std-t102` | AMBE+2 3600x2450 |
+| STD-T102 第 2 編 | 狭帯域デジタル通信方式（SCPC/4 値 FSK） | `std-t102` | AMBE+2 3600x2450 |
+| STD-B54 | STD-T102 第 2 編の上に乗る選択呼出・GPS・ベアラ・メッセージモード・ステータス・発信者名・スクランブル暗号 | `std-t102` | 第 2 編と同じ |
 | STD-T98 第 3 編 | デジタル簡易無線（四値周波数偏位変調） | `std-t98-fsk4` | AMBE+2 3600x2450 |
 
 `arib` は全部入り。`arib live --std t86|t115-qpsknarrow|t79|t61|t102|t98-fsk4 …` は各バイナリの `live` と同じで、
 `arib probe` は 1 局を全部の規格で同時に試して、どれかを判定する。
+
+| | |
+|---|---|
+| STD-T86<br>![std-t86 の画面](screenshots/std-t86.png) | STD-T115 QPSK ナロー方式<br>![std-t115-qpsknarrow の画面](screenshots/std-t115-qpsknarrow.png) |
+| STD-T79 TYPE1<br>![std-t79 の画面](screenshots/std-t79.png) | STD-T61<br>![std-t61 の画面](screenshots/std-t61.png) |
+| STD-T102 第 2 編<br>![std-t102 の画面](screenshots/std-t102.png) | STD-T98 第 3 編<br>![std-t98-fsk4 の画面](screenshots/std-t98-fsk4.png) |
 
 ## 入手
 
