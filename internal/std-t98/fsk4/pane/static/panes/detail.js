@@ -57,7 +57,7 @@ export function init(store) {
     setText(cells.uc, st.u >= 0 ? String(st.u) : '-');
     const g = st.u >= 0 ? groupOf(st, st.u) : null;
     setText(cells.cipher, g ? cipherText(g.cipher, g.key, g.key_how) : (ext.call || '-'));
-    setText(cells.csm, st.caller || '-');
+    setText(cells.csm, st.caller ? `${st.caller}${ext.caller_licensee ? `（${ext.caller_licensee}）` : ''}` : '-');
     setText(cells.sb0, ext.sb0 ? `${ext.sb0} 枚（呼出名称が読めた ${ext.pich_ok || 0}）` : '-');
     setText(cells.maker, st.maker > 0 ? String(st.maker) : st.maker === 0 ? '0（共通製造者番号）' : '-');
     setText(cells.codec, st.codec || '-');

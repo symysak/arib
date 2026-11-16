@@ -10,6 +10,7 @@ import (
 	"github.com/symysak/arib/internal/credit"
 	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/std-t98/fsk4/chplan"
+	"github.com/symysak/arib/internal/std-t98/fsk4/licensee"
 	"github.com/symysak/arib/internal/std-t98/fsk4/server"
 	"github.com/symysak/arib/internal/voice"
 )
@@ -30,6 +31,8 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	audioAGC := fs.Bool("audio-agc", true, "復号した音声の音量を局ごとにそろえる（自動利得調整。ゲート −70 dBFS・最大 +42 dB。false で素のまま）")
 	codecOpt := voice.Options{}
 	fs.Func("codec-opt", "名前で指定した符号器の設定 key=value（何度でも）", codecOpt.ParseOption)
+	lic := fs.String("licensees", "auto", "呼出名称 → 免許人の表（TSV か .tsv.gz。auto は data/musen/"+licensee.DefaultName+
+		" か実行ファイルの隣を探す・off で使わない）。免許局（呼出名称の先頭 1）の免許人・設置場所を出す")
 	var keys []string
 	fs.Func("key", "秘話鍵 <1〜32767>（どのユーザコードにも）か <ユーザコード 0〜511>:<秘話鍵>（何度でも。無ければ秘話通信は符号器が通話の中で当てる）",
 		func(s string) error { keys = append(keys, s); return nil })
@@ -97,9 +100,17 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	for _, n := range notes {
 		fmt.Fprintln(stderr, n)
 	}
+	db, err := licensee.Open(*lic)
+	if err != nil {
+		fmt.Fprintln(stderr, "-licensees:", err)
+		return 2
+	}
+	if db != nil {
+		fmt.Fprintln(stderr, "免許人の表:", db.Summary())
+	}
 	ec := l.Engine(plan)
 	ec.LogOut, ec.PreS, ec.NoIQ = stderr, *pre, *noIQ
-	m := server.NewMonitor(server.Config{Engine: ec, Codec: *codec, CodecOpt: codecOpt, Keys: km,
+	m := server.NewMonitor(server.Config{Engine: ec, Codec: *codec, CodecOpt: codecOpt, Keys: km, Licensees: db,
 		NoTCH: *noTCH, AudioAGC: *audioAGC, LedgerDir: l.LedgerDir()})
 	fmt.Fprintln(stderr, credit.Line())
 	fmt.Fprintf(stderr, "ARIB STD-T98 第 3 編 モニタ: http://%s/\n", l.Addr)

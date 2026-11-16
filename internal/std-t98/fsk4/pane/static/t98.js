@@ -22,6 +22,24 @@ export function wcCell(st) {
   return { text: `0x${st.init.toString(16).toUpperCase().padStart(3, '0')}`, title: `ホワイトニングの初期値（${st.init_why || ''}）` };
 }
 
+export function licenseeCell(e) {
+  if (!e || !e.licensee) return { text: '' };
+  const place = e.location || e.area || '';
+  const t = [`免許人 ${e.licensee}${e.corp_no ? `（法人番号 ${e.corp_no}）` : ''}`];
+  if (e.location) t.push(`設置場所 ${e.location}`);
+  if (e.area) t.push(`移動範囲 ${e.area}`);
+  if (e.purpose) t.push(`目的 ${e.purpose}`);
+  if (e.license_date) t.push(`免許の年月日 ${e.license_date}${e.valid_until ? `（${e.valid_until} まで）` : ''}`);
+  if (e.bands) t.push(`周波数 ${e.bands.replaceAll(',', ' / ')} MHz`);
+  if (e.bureau) t.push(`所轄 ${e.bureau}`);
+  return { text: place ? `${e.licensee}（${place}）` : e.licensee, title: t.join('\n') };
+}
+
+function csmCell(csm, who) {
+  if (!csm) return '';
+  return who ? { text: `${csm} ${who}`, title: `呼出名称 ${csm}・免許人 ${who}` } : csm;
+}
+
 export function chText(ch) { return ch ? `${ch.class} ${ch.no}` : ''; }
 
 function txKey(tx, st) {
@@ -42,11 +60,11 @@ configure({
       const g = st.u >= 0 ? groupOf(st, st.u) : null;
       return g ? callCell(g.cipher, g.key, g.key_how) : { text: '' };
     } },
-    { name: '呼出名称', cls: 'mono', get: (st) => st.caller || '' },
+    { name: '呼出名称', cls: 'mono', get: (st) => csmCell(st.caller, st.ext && st.ext.caller_licensee) },
   ],
   txCols: [
     { name: 'チャネル', get: (tx) => { const e = tx.ext || {}; return e.ch ? `${e.class} ${e.ch}` : ''; } },
-    { name: '呼出名称', cls: 'mono', get: (tx) => (tx.name ? tx.name
+    { name: '呼出名称', cls: 'mono', get: (tx) => (tx.name ? csmCell(tx.name, (tx.ext || {}).licensee)
       : { text: '読めず', cls: 'muted tiny', title: '同期バーストの PICH を聞き逃したか、CRC が通らなかった' }) },
     { name: 'WC', cls: 'mono', get: (tx, st) => wcCell(st) },
     { name: 'UC', cls: 'mono', get: (tx) => (tx.u >= 0 ? String(tx.u) : '') },
@@ -54,14 +72,14 @@ configure({
   ],
   txSearch: (tx, st) => {
     const e = tx.ext || {};
-    return `${e.class || ''} ${e.ch || ''}ch ${tx.name || ''} uc${tx.u} ${tx.u} ${e.call || ''} 製造者${tx.maker} 鍵${e.cipher ? txKey(tx, st)[0] : ''}`;
+    return `${e.class || ''} ${e.ch || ''}ch ${tx.name || ''} ${e.licensee || ''} ${e.place || ''} uc${tx.u} ${tx.u} ${e.call || ''} 製造者${tx.maker} 鍵${e.cipher ? txKey(tx, st)[0] : ''}`;
   },
   focusHead: (tx, st) => {
     const e = tx.ext || {};
     const ch = e.ch ? `${e.class} ${e.ch} ch` : '割当の外';
     return {
       big: tx.name || '呼出名称は読めず',
-      sub: `${tx.name ? `${e.csm_class || ''}・` : ''}${ch}${st ? `（${st.mhz.toFixed(5)} MHz）` : ''}`,
+      sub: `${tx.name ? `${e.csm_class || ''}・` : ''}${e.licensee ? `${e.licensee}${e.place ? `（${e.place}）` : ''}・` : ''}${ch}${st ? `（${st.mhz.toFixed(5)} MHz）` : ''}`,
     };
   },
   focusRows: (tx, st) => {

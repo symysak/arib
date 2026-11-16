@@ -24,6 +24,7 @@ import (
 	t86cli "github.com/symysak/arib/internal/std-t86/cli"
 	t86 "github.com/symysak/arib/internal/std-t86/server"
 	t98cli "github.com/symysak/arib/internal/std-t98/fsk4/cli"
+	"github.com/symysak/arib/internal/std-t98/fsk4/licensee"
 	t98 "github.com/symysak/arib/internal/std-t98/fsk4/server"
 )
 
@@ -325,9 +326,15 @@ func (t *t98Mon) Evidence() Evidence {
 	return Evidence{}
 }
 
+var t98Licensees = sync.OnceValues(func() (*licensee.DB, error) { return licensee.Open("auto") })
+
 func newT98(e Env) (Monitor, error) {
 	ec := e.Live.Engine(e.Plan)
 	ec.Open, ec.LogDir, ec.LogOut, ec.Inputs = e.Open, e.LogDir, e.LogOut, nil
-	m := t98.NewMonitor(t98.Config{Engine: ec, Codec: "auto", AudioAGC: true, AudioTap: audioTap(e)})
+	db, err := t98Licensees()
+	if err != nil {
+		return nil, err
+	}
+	m := t98.NewMonitor(t98.Config{Engine: ec, Codec: "auto", AudioAGC: true, AudioTap: audioTap(e), Licensees: db})
 	return &t98Mon{m: m}, nil
 }

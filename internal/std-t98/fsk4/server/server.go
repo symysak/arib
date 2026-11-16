@@ -11,6 +11,7 @@ import (
 	"github.com/symysak/arib/internal/rx"
 	"github.com/symysak/arib/internal/std-t98/fsk4/chplan"
 	"github.com/symysak/arib/internal/std-t98/fsk4/l1"
+	"github.com/symysak/arib/internal/std-t98/fsk4/licensee"
 	"github.com/symysak/arib/internal/std-t98/fsk4/pane"
 	"github.com/symysak/arib/internal/voice"
 )
@@ -39,10 +40,11 @@ type Config struct {
 	NoTCH bool
 	AudioAGC bool
 	AudioTap func(idx int, pcm []int16, rate int)
+	Licensees *licensee.DB
 	LedgerDir string
 }
 
-func Spec(keys map[int]int) nx.Spec {
+func Spec(keys map[int]int, db *licensee.DB) nx.Spec {
 	init := l1.WhiteningInit
 	return nx.Spec{
 		Name: "STD-T98", System: System, Key: "t98",
@@ -54,12 +56,12 @@ func Spec(keys map[int]int) nx.Spec {
 		Meta:       map[string]any{"channels": chplan.All()},
 		Panes:      []fs.FS{pane.FS()},
 		Note:       stationNote,
-		NewLink:    func(h nx.Host) nx.Link { return newLink(h, keys) },
+		NewLink:    func(h nx.Host) nx.Link { return newLink(h, keys, db) },
 	}
 }
 
 func NewMonitor(cfg Config) *Monitor {
-	return nx.NewMonitor(Spec(cfg.Keys), nx.Config{Engine: cfg.Engine, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: "off",
+	return nx.NewMonitor(Spec(cfg.Keys, cfg.Licensees), nx.Config{Engine: cfg.Engine, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: "off",
 		NoTCH: cfg.NoTCH, AudioAGC: cfg.AudioAGC, AudioTap: cfg.AudioTap, LedgerDir: cfg.LedgerDir})
 }
 
@@ -72,7 +74,11 @@ func stationNote(s Station) string {
 		parts = append(parts, fmt.Sprintf("UC %d", s.U))
 	}
 	if s.Caller != "" {
-		parts = append(parts, "呼出名称 "+s.Caller)
+		c := "呼出名称 " + s.Caller
+		if n, _ := s.Ext["caller_licensee"].(string); n != "" {
+			c += "（" + n + "）"
+		}
+		parts = append(parts, c)
 	}
 	return strings.Join(parts, "・")
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/symysak/arib/internal/std-t98/fsk4/chplan"
 	"github.com/symysak/arib/internal/std-t98/fsk4/l1"
 	"github.com/symysak/arib/internal/std-t98/fsk4/l3"
+	"github.com/symysak/arib/internal/std-t98/fsk4/licensee"
 )
 
 const (
@@ -27,6 +28,7 @@ type Radio struct {
 	UC     int  `json:"uc"`
 	Maker  int  `json:"maker"`
 	Cipher bool `json:"cipher"`
+	Licensee *licensee.Entry `json:"licensee,omitempty"`
 }
 
 type Group struct {
@@ -45,6 +47,7 @@ type Group struct {
 
 type link struct {
 	h   nx.Host
+	db  *licensee.DB
 	ch  *chplan.Channel
 	asm *l3.Asm
 	cfg      map[int]int
@@ -68,8 +71,8 @@ type link struct {
 	sb0, pichOK int
 }
 
-func newLink(h nx.Host, keys map[int]int) *link {
-	k := &link{h: h, asm: l3.NewAsm(), cfg: keys, found: map[int]int{}, radios: map[string]*Radio{}, groups: map[int]*Group{}}
+func newLink(h nx.Host, keys map[int]int, db *licensee.DB) *link {
+	k := &link{h: h, db: db, asm: l3.NewAsm(), cfg: keys, found: map[int]int{}, radios: map[string]*Radio{}, groups: map[int]*Group{}}
 	if c, ok := chplan.Lookup(h.MHz()); ok {
 		k.ch = &c
 	}
@@ -332,9 +335,16 @@ func has(list []string, s string) bool {
 func (k *link) onPICH(t float64, pi l3.PICH) {
 	if k.tx.csm != pi.CSM {
 		k.tx.csm = pi.CSM
+		e, ok := k.db.Lookup(pi.CSM)
 		k.h.Tx(func(tx *TxRec) bool {
 			tx.Name = pi.CSM
 			tx.Ext["csm_class"] = l3.ClassName(pi.Class)
+			if ok {
+				tx.Ext["licensee"], tx.Ext["place"] = e.Licensee, e.Place()
+			} else {
+				delete(tx.Ext, "licensee")
+				delete(tx.Ext, "place")
+			}
 			return true
 		})
 	}
@@ -350,8 +360,13 @@ func (k *link) onPICH(t float64, pi l3.PICH) {
 			delete(k.radios, old)
 		}
 		r = &Radio{CSM: pi.CSM, Class: l3.ClassName(pi.Class), UC: -1, Maker: -1}
+		if e, ok := k.db.Lookup(pi.CSM); ok {
+			r.Licensee = &e
+			k.h.Logf("call", "info", "呼出名称 %s（%s）= %s（%s）", pi.CSM, r.Class, e.Licensee, e.Place())
+		} else {
+			k.h.Logf("call", "info", "呼出名称 %s（%s）", pi.CSM, r.Class)
+		}
 		k.radios[pi.CSM] = r
-		k.h.Logf("call", "info", "呼出名称 %s（%s）", pi.CSM, l3.ClassName(pi.Class))
 	}
 	r.N++
 	r.LastT = t
@@ -361,7 +376,14 @@ func (k *link) onPICH(t float64, pi l3.PICH) {
 			g.Radios = append(g.Radios, pi.CSM)
 		}
 	}
-	k.h.EditStation(func(st *Station) { st.Caller = pi.CSM }, false)
+	k.h.EditStation(func(st *Station) {
+		st.Caller = pi.CSM
+		if r.Licensee != nil {
+			st.Ext["caller_licensee"] = r.Licensee.Licensee
+		} else {
+			delete(st.Ext, "caller_licensee")
+		}
+	}, false)
 }
 
 func (k *link) VoiceOpt(codec string, opt map[string]string) {
