@@ -65,6 +65,8 @@ type Engine struct {
 	origin time.Time
 	det    Detector
 	head   *HeadRing
+	front      Front
+	frontOwned bool
 	blocked *blocklist
 	preOpt map[float64]any
 
@@ -203,6 +205,13 @@ func (e *Engine) idFor(mhz float64) int {
 	return id
 }
 
+func (e *Engine) makeFront(rate float64) Front {
+	if fs, ok := e.std.(FrontStandard); ok && rate > 0 {
+		return fs.NewFront(rate)
+	}
+	return nil
+}
+
 func (e *Engine) add(mhz float64, kind int, opt any) *station {
 	id := e.idFor(mhz)
 	replay := 0
@@ -223,7 +232,7 @@ func (e *Engine) add(mhz float64, kind int, opt any) *station {
 	}
 	s.offHz = mhz*1e6 - e.cfg.CenterHz
 	s.ch = e.std.NewChannel(ChannelConfig{ID: id, MHz: mhz, OffHz: s.offHz, FsIn: e.rate, Opt: opt,
-		StartSec: start}, s)
+		StartSec: start, Front: e.front}, s)
 	e.mu.Lock()
 	e.byID[id] = s
 	e.mu.Unlock()
@@ -307,6 +316,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	if o.OnStart != nil {
 		o.OnStart(src.Describe(), rate)
 	}
+	e.front, e.frontOwned = e.makeFront(rate), true
 	var ss []*station
 	for _, mhz := range chans {
 		off := mhz*1e6 - o.CenterHz
@@ -427,10 +437,14 @@ func (e *Engine) Run(ctx context.Context) error {
 					ss = e.scanStep(ss, e.elapsed)
 				}
 			}
-			e.distribute(ss, iq, src.Lossy())
+			c := Chunk{IQ: iq}
+			if e.front != nil {
+				c.Prep = e.front.Prepare(iq)
+			}
+			e.distribute(ss, c, src.Lossy())
 			e.read += int64(len(iq))
 			if e.head != nil {
-				e.head.Push(iq)
+				e.head.Push(c)
 			}
 		} else if err == nil {
 			if quietSince.IsZero() {
@@ -486,11 +500,11 @@ func (e *Engine) applyCmds(ss []*station) []*station {
 	return ss
 }
 
-func (e *Engine) distribute(ss []*station, iq []complex64, lossy bool) {
+func (e *Engine) distribute(ss []*station, c Chunk, lossy bool) {
 	pressure := lossy && e.pressure(ss, time.Now())
 	for _, s := range ss {
 		if !lossy {
-			s.in <- iq
+			s.in <- c
 			continue
 		}
 		if pressure && s.backlog() >= shedLowWater && !s.recording.Load() && s.kind != scanPinned {
@@ -502,7 +516,7 @@ func (e *Engine) distribute(ss []*station, iq []complex64, lossy bool) {
 			continue
 		}
 		select {
-		case s.in <- iq:
+		case s.in <- c:
 		default:
 			s.dropped.Add(1)
 		}

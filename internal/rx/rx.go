@@ -24,6 +24,24 @@ type ChannelConfig struct {
 	MHz, OffHz, FsIn float64
 	Opt any
 	StartSec float64
+	Front Front
+}
+
+type Front interface {
+	Prepare(wide []complex64) any
+}
+
+type FrontStandard interface {
+	NewFront(fsIn float64) Front
+}
+
+type FrontChannel interface {
+	FeedFront(wide []complex64, prep any)
+}
+
+type Chunk struct {
+	IQ   []complex64
+	Prep any
 }
 
 type DetectorConfig struct {

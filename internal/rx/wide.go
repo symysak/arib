@@ -55,12 +55,15 @@ type wideInput struct {
 }
 
 type wideMsg struct {
-	in     int
-	iq     []complex64
-	data   bool
-	tuning *iqsrc.Tuning
-	src    iqsrc.Source
-	end    bool
+	in int
+	iq []complex64
+	prep any
+	front    Front
+	frontSet bool
+	data     bool
+	tuning   *iqsrc.Tuning
+	src      iqsrc.Source
+	end      bool
 }
 
 func NewWide(std Standard, cfg Config) *Wide {
@@ -344,6 +347,9 @@ func (w *Wide) Run(ctx context.Context) error {
 			o.OnInputStart(i, srcs[i].Describe(), in.e.rate)
 		}
 	}
+	for _, in := range w.ins {
+		in.e.front = in.e.makeFront(in.e.rate)
+	}
 	place := func(mhz float64, kind int) {
 		j := w.best(mhz, -1)
 		if j < 0 {
@@ -532,6 +538,9 @@ func (w *Wide) handle(in *wideInput, m wideMsg) {
 		return
 	}
 	in.ss = e.applyCmds(in.ss)
+	if m.frontSet {
+		e.front = m.front
+	}
 	if m.tuning != nil {
 		var moved bool
 		if in.ss, moved = e.followTuning(*m.tuning, in.ss); moved && in.brec != nil {
@@ -554,10 +563,11 @@ func (w *Wide) handle(in *wideInput, m wideMsg) {
 			in.ss = e.scanStep(in.ss, e.elapsed)
 		}
 	}
-	e.distribute(in.ss, m.iq, in.lossy)
+	c := Chunk{IQ: m.iq, Prep: m.prep}
+	e.distribute(in.ss, c, in.lossy)
 	e.read += int64(len(m.iq))
 	if e.head != nil {
-		e.head.Push(m.iq)
+		e.head.Push(c)
 	}
 }
 
@@ -572,6 +582,13 @@ func (w *Wide) reader(in *wideInput, src iqsrc.Source, all chan<- wideMsg, stopp
 	in.e.mu.Unlock()
 	chunk := int(rate * 0.1)
 	stall := NewStallMeter(rate)
+	front := in.e.front
+	prep := func(iq []complex64) any {
+		if front == nil || len(iq) == 0 {
+			return nil
+		}
+		return front.Prepare(iq)
+	}
 	var quietSince time.Time
 	send(wideMsg{src: src})
 	for {
@@ -589,12 +606,15 @@ func (w *Wide) reader(in *wideInput, src iqsrc.Source, all chan<- wideMsg, stopp
 		}
 		if t, ok := takeTuning(src); ok {
 			tt := t
-			send(wideMsg{tuning: &tt})
+			m := wideMsg{tuning: &tt}
 			if t.Rate > 0 && math.Abs(t.Rate-rate) > 0.5 {
 				rate = t.Rate
 				chunk = int(rate * 0.1)
 				stall = NewStallMeter(rate)
+				front = in.e.makeFront(rate)
+				m.front, m.frontSet = front, true
 			}
+			send(m)
 		}
 		iq, err := src.Read(chunk)
 		if stopping.Load() {
@@ -627,13 +647,13 @@ func (w *Wide) reader(in *wideInput, src iqsrc.Source, all chan<- wideMsg, stopp
 			}
 			if src.Lossy() && ReopenSource(&src, in.open, lg, in.label+"が切れた", stopping) {
 				stall = NewStallMeter(rate)
-				send(wideMsg{iq: iq, src: src, data: true})
+				send(wideMsg{iq: iq, prep: prep(iq), src: src, data: true})
 				continue
 			}
-			send(wideMsg{iq: iq, data: true, end: true})
+			send(wideMsg{iq: iq, prep: prep(iq), data: true, end: true})
 			return
 		}
-		send(wideMsg{iq: iq, data: true})
+		send(wideMsg{iq: iq, prep: prep(iq), data: true})
 	}
 }
 

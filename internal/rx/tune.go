@@ -39,6 +39,9 @@ func (e *Engine) followTuning(t iqsrc.Tuning, ss []*station) (_ []*station, move
 	e.mu.Lock()
 	if rateMoved {
 		e.rate = t.Rate
+		if e.frontOwned {
+			e.front = e.makeFront(t.Rate)
+		}
 	}
 	if centerMoved {
 		e.cfg.CenterHz = t.CenterHz
@@ -58,7 +61,7 @@ func (e *Engine) followTuning(t iqsrc.Tuning, ss []*station) (_ []*station, move
 		s := ss[0]
 		if math.Abs(s.mhz-vfo)*1e6 <= e.std.Grid()/2 {
 			if math.Abs(s.mhz-vfo) > 1e-7 {
-				s.in <- nil
+				s.in <- Chunk{}
 			}
 			return ss, moved
 		}

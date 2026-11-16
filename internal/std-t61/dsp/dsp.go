@@ -19,6 +19,11 @@ const (
 	coarseFFT = 8192
 	coarseMinScore = 0.15
 	coarseRetryWindows = 4
+	coarseGate = 1.41
+	coarseHotWindows = 8
+	coarseFallbackWindows = 40
+	coarseStartWindows = 8
+	coarseFloorRise = 1.005
 )
 
 type Config struct {
@@ -80,6 +85,14 @@ type Demod struct {
 	coarseDone bool
 	coarseHz   float64
 	coarseWin  int
+	coarseFloor float64
+	coarseHot   int
+	coarseLast  int
+	coarseEvals int
+
+	coarseX, coarseY []complex128
+	coarseBits       []uint8
+	mfIn, mfOut      []complex64
 }
 
 func New(cfg Config) *Demod {
@@ -122,7 +135,9 @@ func (d *Demod) Process(x []complex64) []Symbol {
 	if !d.coarseDone {
 		d.coarseBuf = append(d.coarseBuf, y...)
 		for !d.coarseDone && len(d.coarseBuf) >= coarseSamples {
-			if d.coarseWin%coarseRetryWindows == 0 {
+			if d.coarseWanted(d.coarseBuf[:coarseSamples]) {
+				d.coarseLast = d.coarseWin
+				d.coarseEvals++
 				d.coarseAcquire(d.coarseBuf[:coarseSamples])
 			}
 			d.coarseWin++
@@ -132,15 +147,18 @@ func (d *Demod) Process(x []complex64) []Symbol {
 			d.coarseBuf = nil
 		}
 	}
-	in := make([]complex64, 0, len(d.hist)+len(y))
-	in = append(in, d.hist...)
+	in := append(d.mfIn[:0], d.hist...)
 	in = append(in, y...)
+	d.mfIn = in[:0]
 	m := len(d.rrc)
 	if len(in) < m {
-		d.hist = in
+		d.hist = append(d.hist[:0], in...)
 		return nil
 	}
-	out := make([]complex64, len(in)-m+1)
+	if cap(d.mfOut) < len(in)-m+1 {
+		d.mfOut = make([]complex64, len(in)-m+1)
+	}
+	out := d.mfOut[:len(in)-m+1]
 	for i := range out {
 		var re, im float64
 		seg := in[i : i+m]
@@ -245,11 +263,45 @@ func (d *Demod) updateLoops() {
 	d.magAcc, d.magN = 0, 0
 }
 
+func (d *Demod) coarseWanted(win []complex64) bool {
+	var p float64
+	for _, v := range win {
+		p += float64(real(v))*float64(real(v)) + float64(imag(v))*float64(imag(v))
+	}
+	p /= float64(len(win))
+	w := d.coarseWin
+	var want bool
+	switch {
+	case w < coarseStartWindows:
+		want = w%coarseRetryWindows == 0
+		if p > d.coarseFloor*coarseGate && d.coarseFloor > 0 {
+			want = true
+		}
+	case p > d.coarseFloor*coarseGate:
+		d.coarseHot++
+		want = d.coarseHot <= coarseHotWindows || w-d.coarseLast >= coarseRetryWindows
+	default:
+		d.coarseHot = 0
+		want = w-d.coarseLast >= coarseFallbackWindows
+	}
+	if d.coarseFloor == 0 || p < d.coarseFloor {
+		d.coarseFloor = p
+	} else {
+		d.coarseFloor *= coarseFloorRise
+	}
+	return want
+}
+
 func (d *Demod) coarseAcquire(buf []complex64) {
-	X := make([]complex128, coarseFFT)
+	if d.coarseX == nil {
+		d.coarseX = make([]complex128, coarseFFT)
+		d.coarseY = make([]complex128, coarseFFT)
+	}
+	X := d.coarseX
 	for i, v := range buf {
 		X[i] = c128(v)
 	}
+	clear(X[len(buf):])
 	fft(X)
 	n := int(math.Round(coarseRangeHz / coarseStepHz))
 	best, bestM, bestV := 0.0, -1.0, 0
@@ -281,7 +333,8 @@ func (d *Demod) coarseAcquire(buf []complex64) {
 func (d *Demod) coarseEval(X []complex128, f float64, n int) (float64, []uint8) {
 	N := len(X)
 	k := int(math.Round(f / (FsSym / float64(N))))
-	Y := make([]complex128, N)
+	Y := d.coarseY
+	clear(Y)
 	for b, h := range d.rrcH {
 		if h == 0 {
 			continue
@@ -320,7 +373,8 @@ func (d *Demod) coarseEval(X []complex128, f float64, n int) (float64, []uint8) 
 	if d.cfg.CoarseCheck == nil {
 		return bestM, nil
 	}
-	bits := make([]uint8, 0, 2*(n/SamplesPerSymbol))
+	bits := d.coarseBits[:0]
+	defer func() { d.coarseBits = bits[:0] }()
 	for i := bestPh + SamplesPerSymbol; i < n; i += SamplesPerSymbol {
 		z := y[i] * cmplx.Conj(y[i-SamplesPerSymbol])
 		x, yb := Symbol{Diff: complex64(z)}.Bits()
@@ -599,6 +653,7 @@ type resampler struct {
 	ratio float64
 	hist  []complex64
 	pos   float64
+	buf, out []complex64
 }
 
 func newResampler(fsIn, fsOut float64) *resampler {
@@ -606,8 +661,10 @@ func newResampler(fsIn, fsOut float64) *resampler {
 }
 
 func (r *resampler) process(x []complex64) []complex64 {
-	in := append(r.hist, x...)
-	var out []complex64
+	in := append(r.buf[:0], r.hist...)
+	in = append(in, x...)
+	r.buf = in[:0]
+	out := r.out[:0]
 	for {
 		i := int(math.Floor(r.pos))
 		if i+2 >= len(in) {
@@ -628,10 +685,13 @@ func (r *resampler) process(x []complex64) []complex64 {
 	if keep > len(in) {
 		keep = len(in)
 	}
-	r.hist = append([]complex64(nil), in[keep:]...)
+	r.hist = append(r.hist[:0], in[keep:]...)
 	r.pos -= float64(keep)
+	r.out = out[:0]
 	return out
 }
+
+func ChannelTaps(fs float64) []float64 { return newFIR(fs, 1, 6000, 2500, winHamming).taps }
 
 type DDC struct {
 	nco   *nco

@@ -17,7 +17,7 @@ type station struct {
 	mhz float64
 	offHz float64
 	ch    Channel
-	in    chan []complex64
+	in    chan Chunk
 	qlen int
 	done chan struct{}
 	dropped atomic.Int64
@@ -52,7 +52,7 @@ func newStation(e *Engine, id int, mhz float64) *station { return newStationRoom
 
 func newStationRoom(e *Engine, id int, mhz float64, replay int) *station {
 	q := e.queueLen()
-	s := &station{e: e, id: id, mhz: mhz, qlen: q, in: make(chan []complex64, q+max(replay, 0)), done: make(chan struct{}), recs: map[int]*openRec{}}
+	s := &station{e: e, id: id, mhz: mhz, qlen: q, in: make(chan Chunk, q+max(replay, 0)), done: make(chan struct{}), recs: map[int]*openRec{}}
 	s.activeNS.Store(time.Now().UnixNano())
 	return s
 }
@@ -61,7 +61,9 @@ func (s *station) activeAt() time.Time { return time.Unix(0, s.activeNS.Load()) 
 
 func (s *station) run() {
 	lastDropped := s.dropped.Load()
-	for iq := range s.in {
+	fc, _ := s.ch.(FrontChannel)
+	for c := range s.in {
+		iq := c.IQ
 		if iq == nil {
 			s.ch.Retune()
 			continue
@@ -74,6 +76,10 @@ func (s *station) run() {
 			s.ch.Resync()
 		}
 		s.fed += int64(len(iq))
+		if fc != nil && c.Prep != nil {
+			fc.FeedFront(iq, c.Prep)
+			continue
+		}
 		s.ch.Feed(iq)
 	}
 	s.ch.Close(s.dropping)

@@ -56,7 +56,7 @@ func ReopenSource(src *iqsrc.Source, open func() (iqsrc.Source, error), lg *Logg
 }
 
 type HeadRing struct {
-	chunks [][]complex64
+	chunks []Chunk
 	total  int
 	max    int
 }
@@ -71,25 +71,25 @@ func NewHeadRing(sec, rate float64) *HeadRing {
 
 func (r *HeadRing) Len() int { return len(r.chunks) }
 
-func (r *HeadRing) Push(iq []complex64) {
-	if len(iq) == 0 {
+func (r *HeadRing) Push(c Chunk) {
+	if len(c.IQ) == 0 {
 		return
 	}
-	r.chunks = append(r.chunks, iq)
-	r.total += len(iq)
-	for len(r.chunks) > 1 && r.total-len(r.chunks[0]) >= r.max {
-		r.total -= len(r.chunks[0])
-		r.chunks[0] = nil
+	r.chunks = append(r.chunks, c)
+	r.total += len(c.IQ)
+	for len(r.chunks) > 1 && r.total-len(r.chunks[0].IQ) >= r.max {
+		r.total -= len(r.chunks[0].IQ)
+		r.chunks[0] = Chunk{}
 		r.chunks = r.chunks[1:]
 	}
 }
 
-func (r *HeadRing) Replay(ch chan<- []complex64) int {
+func (r *HeadRing) Replay(ch chan<- Chunk) int {
 	n, _ := r.replay(ch)
 	return n
 }
 
-func (r *HeadRing) replay(ch chan<- []complex64) (int, int64) {
+func (r *HeadRing) replay(ch chan<- Chunk) (int, int64) {
 	n := len(r.chunks)
 	if avail := cap(ch) - len(ch) - 1; avail < n {
 		n = avail
@@ -103,7 +103,7 @@ func (r *HeadRing) replay(ch chan<- []complex64) (int, int64) {
 		select {
 		case ch <- c:
 			sent++
-			samples += int64(len(c))
+			samples += int64(len(c.IQ))
 		default:
 			return sent, samples
 		}

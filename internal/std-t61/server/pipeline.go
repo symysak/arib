@@ -1143,9 +1143,14 @@ func (p *Pipeline) openLedger(chans []float64) []float64 {
 		limit = defaultWatchMax
 	}
 	var added, dropped []float64
+	away := 0
 	for _, mhz := range known {
 		k := int64(math.Round(mhz * 1e4))
 		if have[k] {
+			continue
+		}
+		if !p.inBand(mhz) {
+			away++
 			continue
 		}
 		if len(chans)+len(added) >= limit {
@@ -1163,6 +1168,9 @@ func (p *Pipeline) openLedger(chans []float64) []float64 {
 	if len(dropped) > 0 {
 		p.addLog("system", "局台帳: 上限 %d 局を超えるので %d 局は走査に任せます", limit, len(dropped))
 	}
+	if away > 0 {
+		p.addLog("system", "局台帳: %d 局はどの入力の帯域にも入らないので一覧に出しません", away)
+	}
 	return chans
 }
 
@@ -1171,6 +1179,9 @@ func (p *Pipeline) restoreFromLedger() {
 		return
 	}
 	for _, c := range p.led.Channels() {
+		if !p.inBand(c.MHz) {
+			continue
+		}
 		s := p.addStation(c.MHz)
 		if s == nil {
 			continue
@@ -1190,6 +1201,31 @@ func (p *Pipeline) restoreFromLedger() {
 		s.dirty = true
 		p.mu.Unlock()
 	}
+}
+
+func (p *Pipeline) inBand(mhz float64) bool {
+	type band struct {
+		src          string
+		center, rate float64
+	}
+	w := p.cfg.Watch
+	bs := []band{{p.cfg.Source, w.CenterHz, w.SampleRate}}
+	for _, in := range w.Inputs {
+		bs = append(bs, band{in.Source, in.CenterHz, in.SampleRate})
+	}
+	for _, b := range bs {
+		rate := b.rate
+		if rate == 0 && strings.HasPrefix(b.src, "rtltcp://") {
+			rate = 2400000
+		}
+		if rate == 0 || b.center == 0 {
+			return true
+		}
+		if math.Abs(mhz*1e6-b.center) <= rate/2*0.9 {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Pipeline) pinnedMHz(mhz float64) bool {

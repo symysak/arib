@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/symysak/arib/internal/bitpack"
+	"github.com/symysak/arib/internal/chanbank"
 	"github.com/symysak/arib/internal/iqsrc"
 	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/rx"
@@ -138,8 +139,24 @@ func (*Standard) Name() string { return "T61" }
 
 func (*Standard) Grid() float64 { return scanSlotHz }
 
+const ddcRate = 48000
+
+const frontMinDecim = 4
+
+func (*Standard) NewFront(fsIn float64) rx.Front {
+	d := chanbank.MaxDecim5(fsIn, ddcRate)
+	if d < frontMinDecim {
+		return nil
+	}
+	b, err := chanbank.New(chanbank.Spec{FsIn: fsIn, Decim: d, Taps: dsp.ChannelTaps(fsIn)})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
 func (t *Standard) NewChannel(c rx.ChannelConfig, sink rx.Sink) rx.Channel {
-	w := newWatcher(c.MHz, c.OffHz, c.FsIn, t.o, sink)
+	w := newWatcher(c.MHz, c.OffHz, c.FsIn, c.Front, t.o, sink)
 	w.upBoard = &t.upBoard
 	if t.hooks.NewChannel != nil {
 		w.hook = t.hooks.NewChannel(c.MHz)
@@ -214,8 +231,11 @@ func countsAsCall(held, own l1.RICH, flywheel bool) bool {
 }
 
 type watcher struct {
-	mhz  float64
+	mhz float64
 	ddc  *dsp.DDC
+	bank *chanbank.Bank
+	bch  *chanbank.Channel
+	rate float64
 	d    *dec.Decoder
 	o    Config
 	sink rx.Sink
@@ -250,13 +270,18 @@ type watcher struct {
 	upSeen  int32
 }
 
-func newWatcher(mhz, offHz, fsIn float64, o Config, sink rx.Sink) *watcher {
-	ddc := dsp.NewDDC(fsIn, offHz, 48000)
-	w := &watcher{mhz: mhz, ddc: ddc, o: o, sink: sink}
+func newWatcher(mhz, offHz, fsIn float64, front rx.Front, o Config, sink rx.Sink) *watcher {
+	w := &watcher{mhz: mhz, o: o, sink: sink}
+	if b, ok := front.(*chanbank.Bank); ok {
+		w.bank, w.bch, w.rate = b, b.Channel(offHz), b.OutRate()
+	} else {
+		w.ddc = dsp.NewDDC(fsIn, offHz, ddcRate)
+		w.rate = w.ddc.SampleRate()
+	}
 	if o.IdleTCH {
 		w.idle = newIdleTCH()
 	}
-	w.d = dec.New(dec.Config{SampleRate: ddc.SampleRate(), NoConstellation: !o.Detail, KeepRaw: o.Detail,
+	w.d = dec.New(dec.Config{SampleRate: w.rate, NoConstellation: !o.Detail, KeepRaw: o.Detail,
 		ParseL2: o.ParseL2, AnnotateL3: o.AnnotateL3})
 	w.peak = 1
 	return w
@@ -270,7 +295,21 @@ func (w *watcher) Resync() {
 }
 
 func (w *watcher) Feed(iq []complex64) {
-	y := w.ddc.Process(iq)
+	if w.ddc == nil {
+		return
+	}
+	w.feedBase(w.ddc.Process(iq))
+}
+
+func (w *watcher) FeedFront(_ []complex64, prep any) {
+	p, ok := prep.(chanbank.Prepared)
+	if !ok || w.bch == nil || p.Bank != w.bank {
+		return
+	}
+	w.feedBase(w.bch.Process(p.Blocks))
+}
+
+func (w *watcher) feedBase(y []complex64) {
 	if len(y) == 0 {
 		return
 	}
@@ -286,7 +325,7 @@ func (w *watcher) Feed(iq []complex64) {
 		rms := math.Sqrt(sum / float64(len(y)))
 		w.hook.Level(20 * math.Log10(math.Max(rms, 1e-9)/math.Max(float64(w.peak), 1e-9)))
 	}
-	w.sink.IQ(y, w.ddc.SampleRate())
+	w.sink.IQ(y, w.rate)
 	w.applyUplinkScramble()
 	for _, f := range w.d.Feed(y) {
 		if w.idle != nil {
@@ -304,7 +343,7 @@ func (w *watcher) Feed(iq []complex64) {
 	}
 	w.richOK.Store(w.d.Stats.RICHOK)
 	w.frames.Store(w.d.Stats.Frames)
-	w.procMS.Add(int(float64(len(y)) / w.ddc.SampleRate() * 1000))
+	w.procMS.Add(int(float64(len(y)) / w.rate * 1000))
 	if w.hook != nil && w.hook.Stats != nil {
 		w.hook.Stats(w.d.Stats, w.d.CoarseHz(), w.d.CFOHz(), w.d.Locked())
 	}
@@ -655,7 +694,7 @@ func (w *watcher) startRec(reason string, f dec.Frame) {
 	w.recOn, w.recStart, w.recLast, w.recReason = true, w.procSec(), w.procSec(), reason
 	w.state.Store(int32(rx.StateActive))
 	w.sink.RecNote(0, fmt.Sprintf("周波数 %.4f MHz\n開始 %s\n理由 %s\nRICH %s %s\n入力レート %.0f Hz（DDC 後、std-t61 <file> -offset 0 で再デコード可）",
-		w.mhz, time.Now().Format(time.RFC3339), reason, f.RICH.Bits17(), f.RICH.Describe(w.d.Edition()), w.ddc.SampleRate()))
+		w.mhz, time.Now().Format(time.RFC3339), reason, f.RICH.Bits17(), f.RICH.Describe(w.d.Edition()), w.rate))
 	if w.o.ChannelNote != nil {
 		if n := w.o.ChannelNote(w.mhz); n != "" {
 			w.sink.RecNote(0, "メモ "+n)
