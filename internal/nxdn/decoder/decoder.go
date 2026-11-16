@@ -3,6 +3,7 @@ package decoder
 import (
 	"math"
 
+	"github.com/symysak/arib/internal/chanbank"
 	"github.com/symysak/arib/internal/nxdn/dsp"
 	"github.com/symysak/arib/internal/nxdn/l1"
 )
@@ -11,6 +12,7 @@ type Config struct {
 	SampleRate float64
 	OffsetHz   float64
 	StartSec float64
+	Bank *chanbank.Bank
 }
 
 type Frame struct {
@@ -50,7 +52,12 @@ type Decoder struct {
 }
 
 func New(cfg Config) *Decoder {
-	d := &Decoder{cfg: cfg, fe: dsp.NewFrontEnd(cfg.SampleRate, cfg.OffsetHz), levelDB: math.Inf(-1)}
+	d := &Decoder{cfg: cfg, levelDB: math.Inf(-1)}
+	if cfg.Bank != nil {
+		d.fe = dsp.NewFrontEndBank(cfg.Bank, cfg.OffsetHz)
+	} else {
+		d.fe = dsp.NewFrontEnd(cfg.SampleRate, cfg.OffsetHz)
+	}
 	return d
 }
 
@@ -70,12 +77,25 @@ func (d *Decoder) timeOf(abs float64) float64 {
 
 func (d *Decoder) Reset(startSec float64) {
 	eye := d.WantEye
-	*d = *New(Config{SampleRate: d.cfg.SampleRate, OffsetHz: d.cfg.OffsetHz, StartSec: startSec})
+	cfg := d.cfg
+	cfg.StartSec = startSec
+	*d = *New(cfg)
 	d.WantEye = eye
 }
 
 func (d *Decoder) Feed(wide []complex64) []Frame {
-	o := d.fe.Process(wide)
+	return d.feed(d.fe.Process(wide))
+}
+
+func (d *Decoder) FeedFront(prep any) (frames []Frame, ok bool) {
+	o, ok := d.fe.ProcessFront(prep)
+	if !ok {
+		return nil, false
+	}
+	return d.feed(o), true
+}
+
+func (d *Decoder) feed(o dsp.Output) []Frame {
 	d.IQ = o.IQ
 	if lv := d.fe.LevelDB(); !math.IsInf(lv, -1) {
 		d.levelDB = lv

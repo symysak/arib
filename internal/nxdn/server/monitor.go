@@ -157,6 +157,13 @@ func (m *Monitor) refreshInputs() {
 	}
 }
 
+func (m *Monitor) metaCopy() Meta {
+	mt := m.meta
+	mt.Channels = append([]float64{}, m.meta.Channels...)
+	mt.Inputs = append([]InputMeta{}, m.meta.Inputs...)
+	return mt
+}
+
 func (m *Monitor) Handler() http.Handler { return m.w }
 
 func (m *Monitor) Engine() *rx.Wide { return m.eng }
@@ -214,10 +221,9 @@ func (m *Monitor) Snapshot() Snapshot {
 		chans = append(chans, c)
 	}
 	m.refreshInputs()
-	s := Snapshot{Generator: credit.Generator, Meta: m.meta, Logs: append([]LogLine{}, m.logs...), Recs: append([]Rec{}, m.recs...),
+	s := Snapshot{Generator: credit.Generator, Meta: m.metaCopy(), Logs: append([]LogLine{}, m.logs...), Recs: append([]Rec{}, m.recs...),
 		Frames: append([]FrameRec{}, m.frames...), Msgs: append([]MsgRec{}, m.msgs...), Txs: append([]TxRec{}, m.txs...),
 		Signals: map[string]Signal{}, Ext: map[string]any{}, Stations: []Station{}}
-	s.Meta.Channels = append([]float64{}, m.meta.Channels...)
 	for k, v := range m.signals {
 		s.Signals[strconv.Itoa(k)] = v
 	}
@@ -333,7 +339,7 @@ func (m *Monitor) opened(c *Channel) {
 	if m.std.selected.Load() < 0 {
 		m.std.selected.Store(int64(c.ID()))
 	}
-	meta := m.meta
+	meta := m.metaCopy()
 	m.mu.Unlock()
 	for i := range gone {
 		m.w.Publish(Event{Type: EvStationGone, Idx: gone[i].Idx, Station: &gone[i]})
@@ -369,7 +375,7 @@ func (m *Monitor) closed(c *Channel, dropped bool) {
 		delete(m.chans, c.ID())
 	}
 	m.meta.Channels = channelList(m.chans)
-	meta := m.meta
+	meta := m.metaCopy()
 	m.mu.Unlock()
 	m.w.Publish(Event{Type: EvStationGone, Idx: c.ID(), Station: &Station{Idx: c.ID(), MHz: c.MHz()}})
 	m.w.Publish(Event{Type: EvMeta, Idx: -1, Meta: &meta})
@@ -399,7 +405,7 @@ func (m *Monitor) setMeta(f func(*Meta)) {
 	m.mu.Lock()
 	f(&m.meta)
 	m.refreshInputs()
-	meta := m.meta
+	meta := m.metaCopy()
 	m.mu.Unlock()
 	m.w.Publish(Event{Type: EvMeta, Idx: -1, Meta: &meta})
 }

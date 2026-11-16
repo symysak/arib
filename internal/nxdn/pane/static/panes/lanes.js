@@ -74,7 +74,7 @@ export function init(store) {
 
   function visible(s) {
     const heard = new Set(s.nxdntxs.map((t) => t.idx));
-    return s.stations.filter((st) => showQuiet || heard.has(st.idx) || (st.txs || 0) > 0 || st.synced || store.marked(st.idx));
+    return s.stations.filter((st) => showQuiet || heard.has(st.idx) || (st.txs || 0) > 0 || store.marked(st.idx));
   }
 
   function nowOf(s) {

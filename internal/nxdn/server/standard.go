@@ -140,6 +140,13 @@ func (s *Standard) NewChannel(c rx.ChannelConfig, sink rx.Sink) rx.Channel {
 	return ch
 }
 
+func (*Standard) NewFront(fsIn float64) rx.Front {
+	if b := dsp.NewBank(fsIn); b != nil {
+		return b
+	}
+	return nil
+}
+
 func (*Standard) NewDetector(c rx.DetectorConfig) rx.Detector {
 	if c.FsIn < 3*GridHz {
 		return nil

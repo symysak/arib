@@ -2,6 +2,8 @@ package dsp
 
 import (
 	"math"
+
+	"github.com/symysak/arib/internal/chanbank"
 )
 
 const (
@@ -21,6 +23,8 @@ type FrontEnd struct {
 	fsIn float64
 	nco  *nco
 	dec  *decimator
+	bank *chanbank.Bank
+	bch  *chanbank.Channel
 	res  *resampler
 	rx   []float32
 	hist []float32
@@ -45,6 +49,38 @@ func NewFrontEnd(fsIn, offsetHz float64) *FrontEnd {
 	return fe
 }
 
+const frontMinDecim = 4
+
+func ChannelTaps(fs float64) []float64 {
+	return firTaps(fs, chanCutoff, hammingTaps(fs, chanSharp), winHamming)
+}
+
+const bankOverlap = 8
+
+func NewBank(fsIn float64) *chanbank.Bank {
+	d := chanbank.MaxDecim5(fsIn, Fs)
+	if d < frontMinDecim {
+		return nil
+	}
+	b, err := chanbank.New(chanbank.Spec{FsIn: fsIn, Decim: d, Taps: ChannelTaps(fsIn), Overlap: bankOverlap})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func NewFrontEndBank(b *chanbank.Bank, offsetHz float64) *FrontEnd {
+	fe := &FrontEnd{fsIn: b.FsIn(), bank: b, bch: b.Channel(offsetHz)}
+	if fs1 := b.OutRate(); math.Abs(fs1-Fs) > 1e-6 {
+		fe.res = newResampler(fs1, Fs)
+	}
+	fe.rx = ReceiveFilter(SamplesPerSymbol, rxSpan)
+	fe.hist = make([]float32, len(fe.rx)-1)
+	return fe
+}
+
+func (fe *FrontEnd) Bank() *chanbank.Bank { return fe.bank }
+
 func (fe *FrontEnd) Delay() int { return len(fe.rx) / 2 }
 
 type Output struct {
@@ -53,7 +89,21 @@ type Output struct {
 }
 
 func (fe *FrontEnd) Process(wide []complex64) Output {
-	x := fe.dec.process(fe.nco.mix(wide))
+	if fe.dec == nil {
+		return Output{}
+	}
+	return fe.tail(fe.dec.process(fe.nco.mix(wide)))
+}
+
+func (fe *FrontEnd) ProcessFront(prep any) (Output, bool) {
+	p, ok := prep.(chanbank.Prepared)
+	if !ok || fe.bch == nil || p.Bank != fe.bank {
+		return Output{}, false
+	}
+	return fe.tail(fe.bch.Process(p.Blocks)), true
+}
+
+func (fe *FrontEnd) tail(x []complex64) Output {
 	if fe.res != nil {
 		x = fe.res.process(x)
 	} else {
@@ -226,6 +276,15 @@ func newFIR(fs float64, factor int, cutoff, trans float64, win int) *firStage {
 	if win == winBlackman {
 		n = blackmanTaps(fs, trans)
 	}
+	taps := firTaps(fs, cutoff, n, win)
+	t32 := make([]float32, n)
+	for i := range taps {
+		t32[i] = float32(taps[i])
+	}
+	return &firStage{factor: factor, taps32: t32, hist: make([]complex64, n-1)}
+}
+
+func firTaps(fs, cutoff float64, n, win int) []float64 {
 	c := cutoff / fs
 	taps := make([]float64, n)
 	var sum float64
@@ -245,11 +304,10 @@ func newFIR(fs float64, factor int, cutoff, trans float64, win int) *firStage {
 		taps[i] = v * w
 		sum += taps[i]
 	}
-	t32 := make([]float32, n)
 	for i := range taps {
-		t32[i] = float32(taps[i] / sum)
+		taps[i] /= sum
 	}
-	return &firStage{factor: factor, taps32: t32, hist: make([]complex64, n-1)}
+	return taps
 }
 
 func newDecimator(fs float64, factor int) *decimator {

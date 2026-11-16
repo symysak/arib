@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/symysak/arib/internal/chanbank"
 	"github.com/symysak/arib/internal/data"
 	"github.com/symysak/arib/internal/nxdn/decoder"
 	"github.com/symysak/arib/internal/nxdn/dsp"
@@ -94,7 +95,8 @@ type txState struct {
 
 func newChannel(s *Standard, c rx.ChannelConfig, sink rx.Sink, opt ChannelOpt) *Channel {
 	ch := &Channel{std: s, cfg: c, sink: sink, opt: opt, watched: true, lastMsg: map[string]*MsgRec{}, strong: map[int]map[string]bool{}, lastInit: -1}
-	ch.d = decoder.New(decoder.Config{SampleRate: c.FsIn, OffsetHz: c.OffHz, StartSec: c.StartSec})
+	bank, _ := c.Front.(*chanbank.Bank)
+	ch.d = decoder.New(decoder.Config{SampleRate: c.FsIn, OffsetHz: c.OffHz, StartSec: c.StartSec, Bank: bank})
 	ch.keyer = s.keyer(opt.Init)
 	if s.spec.DataChannel != "" {
 		ch.dataSt = data.NewStation(s.spec.DataChannel, s.cfg.Data)
@@ -120,7 +122,19 @@ func (c *Channel) MHz() float64 { return c.cfg.MHz }
 
 func (c *Channel) Feed(wide []complex64) {
 	c.d.WantEye = int(c.std.selected.Load()) == c.cfg.ID
-	frames := c.d.Feed(wide)
+	c.afterFeed(c.d.Feed(wide))
+}
+
+func (c *Channel) FeedFront(_ []complex64, prep any) {
+	c.d.WantEye = int(c.std.selected.Load()) == c.cfg.ID
+	frames, ok := c.d.FeedFront(prep)
+	if !ok {
+		return
+	}
+	c.afterFeed(frames)
+}
+
+func (c *Channel) afterFeed(frames []decoder.Frame) {
 	c.sink.IQ(c.d.IQ, dsp.Fs)
 	c.setProc(c.d.ProcessedSec())
 	if lv := c.d.LevelDB(); !math.IsInf(lv, 0) {
@@ -553,6 +567,13 @@ func (c *Channel) endTx(now float64, why string) {
 	if !t.opened {
 		c.tx = nil
 		c.link.TxEnd(now, false)
+		c.mu.Lock()
+		was := c.st.Talking
+		c.st.Talking = false
+		c.mu.Unlock()
+		if was {
+			c.publish(true)
+		}
 		return
 	}
 	if t.endSeen && why == "同期が外れた" {
