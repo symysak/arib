@@ -102,6 +102,12 @@ function createStore() {
     switch (ev.type) {
       case 'snapshot': {
         const s = ev.snapshot;
+        const prevT0 = state.meta && state.meta.t0_wall_ms;
+        if (prevT0 !== undefined && s.meta && s.meta.t0_wall_ms !== prevT0) {
+          state.trend = new Map();
+          state.lastT = 0;
+          for (const k of Object.keys(state.ext)) if (!(s.ext && k in s.ext)) state.ext[k] = [];
+        }
         state.meta = s.meta;
         setOrigin(s.meta.t0_wall_ms, s.meta.t0_estimated);
         state.stations = (s.stations || []).slice().sort(byFreq);

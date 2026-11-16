@@ -53,16 +53,20 @@ export function init(store) {
   legend.append(el('span', { class: 'lg muted tiny', text: '行をクリックするとその局を選びます' }));
   body.append(cv, legend);
 
+  const lanesOf = (s) => (s.showLedger ? s.stations
+    : s.stations.filter((x) => !x.ledger || x.idx === s.selected));
+
   cv.addEventListener('click', (e) => {
     const r = cv.getBoundingClientRect();
     const i = Math.floor((e.clientY - r.top) / LANE_H);
-    const st = store.state.stations[i];
+    const st = lanesOf(store.state)[i];
     if (st) store.pick(st.idx);
   });
 
   function draw() {
     const s = store.state;
-    const n = s.stations.length || 1;
+    const lanes = lanesOf(s);
+    const n = lanes.length || 1;
     const hCss = n * LANE_H + 16;
     if (cv.style.height !== `${hCss}px`) cv.style.height = `${hCss}px`;
     const { g, w, h } = fit(cv);
@@ -84,7 +88,7 @@ export function init(store) {
       g.fillText(hms(t), x + 2, n * LANE_H + 11);
     }
 
-    s.stations.forEach((st, i) => {
+    lanes.forEach((st, i) => {
       const y = i * LANE_H;
       const pts = s.trend.get(st.idx) || [];
       for (let k = 0; k < pts.length; k++) {
@@ -113,7 +117,7 @@ export function init(store) {
 
     for (const c of s.calls) {
       if (c.kind !== 'sync_burst' || !c.id || c.t_sec < t0) continue;
-      const i = s.stations.findIndex((x) => x.idx === c.idx);
+      const i = lanes.findIndex((x) => x.idx === c.idx);
       if (i < 0) continue;
       const x = px(c.t_sec);
       g.fillStyle = accent;

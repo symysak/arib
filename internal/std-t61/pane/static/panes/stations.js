@@ -27,6 +27,19 @@ export function init(store) {
 
   const rows = new Map();
 
+  const PREF_LEDGER = 't61.stations.ledger';
+  let showLedger = false;
+  try { showLedger = localStorage.getItem(PREF_LEDGER) === '1'; } catch {  }
+  store.state.showLedger = showLedger;
+  const ledgerBtn = el('button', { class: 'btn', title: '台帳から戻しただけで、この起動ではまだ受けていない局（前回まで）' });
+  sub.after(ledgerBtn);
+  ledgerBtn.addEventListener('click', () => {
+    showLedger = !showLedger;
+    store.state.showLedger = showLedger;
+    try { localStorage.setItem(PREF_LEDGER, showLedger ? '1' : '0'); } catch {  }
+    draw(store.state);
+  });
+
   function makeRow(st) {
     const cells = {};
     const tr = el('tr', { 'data-idx': String(st.idx) });
@@ -128,22 +141,25 @@ export function init(store) {
   }
 
   function draw(s) {
-    syncList(tbody, s.stations, (st) => st.idx, (st) => {
+    const shown = showLedger ? s.stations
+      : s.stations.filter((x) => !x.ledger || x.idx === s.selected);
+    syncList(tbody, shown, (st) => st.idx, (st) => {
       const r = makeRow(st);
       rows.set(st.idx, r);
       return r.tr;
     });
-    if (rows.size !== s.stations.length) {
-      const live = new Set(s.stations.map((x) => x.idx));
+    if (rows.size !== shown.length) {
+      const live = new Set(shown.map((x) => x.idx));
       for (const idx of [...rows.keys()]) if (!live.has(idx)) rows.delete(idx);
     }
-    for (const st of s.stations) update(st, store.marked(st.idx));
+    for (const st of shown) update(st, store.marked(st.idx));
     const sync = s.stations.filter((x) => x.synced).length;
     const rich = s.stations.filter((x) => x.synced && x.rich_ok).length;
     const past = s.stations.filter((x) => x.ledger).length;
     const live = s.stations.length - past;
-    setText(sub, `${sync}/${live} 局が同期中（うち RICH 一致 ${rich}）`
-      + (past ? `　台帳から ${past} 局` : ''));
+    setText(sub, `${sync}/${live} 局が同期中（うち RICH 一致 ${rich}）`);
+    ledgerBtn.style.display = past ? '' : 'none';
+    setText(ledgerBtn, showLedger ? `前回までの ${past} 局を隠す` : `前回までの ${past} 局を出す`);
   }
 
   tbody.addEventListener('click', (e) => {
