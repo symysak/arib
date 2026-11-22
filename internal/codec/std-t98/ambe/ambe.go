@@ -93,8 +93,12 @@ type unit struct {
 const nearMax = 2
 
 func near(a [ambe.Bits3600]uint8) bool {
+	return errs(a) <= nearMax
+}
+
+func errs(a [ambe.Bits3600]uint8) int {
 	c0, c1 := ambe.Errors3600(a)
-	return c0+c1 <= nearMax
+	return c0 + c1
 }
 
 const holdMax = scramble.KeyMaxUnits
@@ -128,15 +132,17 @@ func (v *Voice) Transport(f voice.Frame) (voice.Unit, bool, error) {
 		return voice.Unit{}, false, fmt.Errorf("TCH が %d ビットではなく %d", l1.TCHBits, len(f.Bits))
 	}
 	u := unit{sub: f.Sub & 1}
-	ok := true
+	ok, corr := true, 0
 	for k := 0; k < 2; k++ {
 		copy(u.f[k][:], f.Bits[72*k:72*k+72])
-		u.ok[k] = near(u.f[k])
+		e := errs(u.f[k])
+		corr += e
+		u.ok[k] = e <= nearMax
 		if !u.ok[k] {
 			ok = false
 		}
 	}
-	out := voice.Unit{Data: u, Check: voice.Check{Valid: true, OK: ok}, Raw: pack(f.Bits)}
+	out := voice.Unit{Data: u, Check: voice.Check{Valid: true, OK: ok, Corrected: corr}, Raw: pack(f.Bits)}
 	if !v.started {
 		v.started = true
 		switch key := v.key.Load(); {

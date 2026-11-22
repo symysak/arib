@@ -41,6 +41,7 @@ func (s *Standard) ledgerCodecOf(mhz float64) string {
 
 type StdConfig struct {
 	LogDir string
+	Origin time.Time
 	Codec    string
 	CodecOpt voice.Options
 	Data string

@@ -6,6 +6,7 @@ import (
 	"github.com/symysak/arib/internal/iqsrc"
 )
 
+const vfoSettleSec = 0.5
 
 func takeTuning(src iqsrc.Source) (iqsrc.Tuning, bool) {
 	t, ok := src.(iqsrc.Tuner)
@@ -38,6 +39,9 @@ func (e *Engine) followTuning(t iqsrc.Tuning, ss []*station) (_ []*station, move
 	}
 	e.mu.Lock()
 	if rateMoved {
+		if e.rate > 0 {
+			e.read = int64(float64(e.read) * t.Rate / e.rate)
+		}
 		e.rate = t.Rate
 		if e.frontOwned {
 			e.front = e.makeFront(t.Rate)
@@ -57,14 +61,8 @@ func (e *Engine) followTuning(t iqsrc.Tuning, ss []*station) (_ []*station, move
 	}
 	vfo := vfoMHz(t)
 	off := vfo*1e6 - e.cfg.CenterHz
-	if !rateMoved && len(ss) == 1 && math.Abs(ss[0].offHz-off) < 1 {
-		s := ss[0]
-		if math.Abs(s.mhz-vfo)*1e6 <= e.std.Grid()/2 {
-			if math.Abs(s.mhz-vfo) > 1e-7 {
-				s.in <- Chunk{}
-			}
-			return ss, moved
-		}
+	if !rateMoved && len(ss) == 1 && math.Abs(ss[0].mhz-vfo) < 1e-7 && math.Abs(ss[0].offHz-off) < 1 {
+		return ss, moved
 	}
 	for _, s := range ss {
 		e.drop(s)
@@ -75,10 +73,27 @@ func (e *Engine) followTuning(t iqsrc.Tuning, ss []*station) (_ []*station, move
 	e.mu.Lock()
 	e.cfg.Channels = []float64{vfo}
 	e.mu.Unlock()
-	if math.Abs(off) > e.rate/2*0.9 {
+	e.vfoPending, e.vfoWant, e.vfoSince = true, vfo, e.inputSec()
+	return nil, moved
+}
+
+func (e *Engine) settleVFO(ss []*station) []*station {
+	if !e.vfoPending || e.inputSec()-e.vfoSince < vfoSettleSec {
+		return ss
+	}
+	e.vfoPending = false
+	vfo := e.vfoWant
+	if off := vfo*1e6 - e.cfg.CenterHz; math.Abs(off) > e.rate/2*0.9 {
 		e.lg.Printf("VFO %.4f MHz は入力帯域外（オフセット %+.0f kHz）なので監視しない", vfo, off/1e3)
-		return nil, moved
+		return ss
 	}
 	e.lg.Printf("VFO に付いて局を %.4f MHz へ移した", vfo)
-	return []*station{e.add(vfo, scanPinned, nil)}, moved
+	return append(ss, e.add(vfo, scanPinned, nil))
+}
+
+func (e *Engine) inputSec() float64 {
+	if e.rate <= 0 {
+		return 0
+	}
+	return float64(e.read) / e.rate
 }

@@ -61,9 +61,10 @@ type wideMsg struct {
 	front    Front
 	frontSet bool
 	data     bool
-	tuning   *iqsrc.Tuning
-	src      iqsrc.Source
-	end      bool
+	at     time.Time
+	tuning *iqsrc.Tuning
+	src    iqsrc.Source
+	end    bool
 }
 
 func NewWide(std Standard, cfg Config) *Wide {
@@ -307,6 +308,7 @@ func (w *Wide) Run(ctx context.Context) error {
 		e.rate = src.SampleRate()
 		e.mu.Unlock()
 		in.lossy = src.Lossy()
+		e.clock = NewClock(origin, in.lossy, e.cfg.JitterSec)
 		if t, ok := takeTuning(src); ok {
 			e.tuning, e.haveTuning = t, true
 			e.mu.Lock()
@@ -563,7 +565,11 @@ func (w *Wide) handle(in *wideInput, m wideMsg) {
 			in.ss = e.scanStep(in.ss, e.elapsed)
 		}
 	}
-	c := Chunk{IQ: m.iq, Prep: m.prep}
+	if !m.at.IsZero() {
+		e.observe(len(m.iq), m.at)
+	}
+	in.ss = e.settleVFO(in.ss)
+	c := Chunk{IQ: m.iq, Prep: m.prep, Pos: e.read}
 	e.distribute(in.ss, c, in.lossy)
 	e.read += int64(len(m.iq))
 	if e.head != nil {
@@ -617,6 +623,7 @@ func (w *Wide) reader(in *wideInput, src iqsrc.Source, all chan<- wideMsg, stopp
 			send(m)
 		}
 		iq, err := src.Read(chunk)
+		at := time.Now()
 		if stopping.Load() {
 			send(wideMsg{end: true})
 			return
@@ -647,13 +654,13 @@ func (w *Wide) reader(in *wideInput, src iqsrc.Source, all chan<- wideMsg, stopp
 			}
 			if src.Lossy() && ReopenSource(&src, in.open, lg, in.label+"が切れた", stopping) {
 				stall = NewStallMeter(rate)
-				send(wideMsg{iq: iq, prep: prep(iq), src: src, data: true})
+				send(wideMsg{iq: iq, prep: prep(iq), src: src, data: true, at: at})
 				continue
 			}
-			send(wideMsg{iq: iq, prep: prep(iq), data: true, end: true})
+			send(wideMsg{iq: iq, prep: prep(iq), data: true, at: at, end: true})
 			return
 		}
-		send(wideMsg{iq: iq, prep: prep(iq), data: true})
+		send(wideMsg{iq: iq, prep: prep(iq), data: true, at: at})
 	}
 }
 

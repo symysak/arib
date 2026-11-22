@@ -125,7 +125,7 @@ func (c *Channel) notePress(s *decoder.Slot) {
 	}
 	who := numbering.CallSign(sb.ID).Text()
 	text := fmt.Sprintf("%.4f MHz ST#%d: %s・移動局 %s", down, s.Num, sum, who)
-	c.note(s.Num, "startup "+text)
+	c.callEvent(s.Num, "startup", text)
 	c.logf(s.Num, "call", "info", "通信チャネルの起動（§4.1.16.2）%s", text)
 	c.emitCall(CallRec{TSec: s.TSec, Slot: s.Num, Channel: "SB", Kind: "通信チャネルの起動", Text: text, ToSlot: -1, Ref: -1, ID: sb.ID, MS: who})
 }
@@ -148,7 +148,7 @@ func (c *Channel) pollTalker(n int, now float64) {
 	}
 	cs.lastTalker = id
 	who := numbering.CallSign(id).Text()
-	c.note(n, fmt.Sprintf("talker %.3f %s（上りの同期バーストの呼出符号）", t, who))
+	c.callEvent(n, "talker", fmt.Sprintf("%.3f %s（上りの同期バーストの呼出符号）", t, who))
 	c.emitCall(CallRec{TSec: now, Slot: n, Channel: "SB↑", Kind: "話者（プレス）", Text: "上りで送信を始めた移動局 " + who,
 		ToSlot: -1, Ref: -1, ID: id, MS: who})
 	c.mu.Lock()

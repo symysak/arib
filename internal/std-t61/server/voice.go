@@ -360,6 +360,9 @@ func (r *voiceRun) newTracker(codec *voice.Codec, name string) *voice.Tracker {
 		}
 		text := fmt.Sprintf("音声 %d フレーム（%.1f 秒） %s OK %d", cl.Frames, float64(cl.Frames)*voice.FrameSec, check, cl.OK)
 		r.event(cl.TimeSec, "voice_end", text+tentative)
+		if cl.Stats.Frames > 0 {
+			r.event(cl.TimeSec, "voice_stats", cl.Stats.Text())
+		}
 		r.p.addLogFor(r.idx, "call", "%s", text)
 	}
 	notes := map[string]bool{}

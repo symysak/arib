@@ -24,6 +24,7 @@ import (
 	"github.com/symysak/arib/internal/std-t61/l2"
 	"github.com/symysak/arib/internal/std-t61/l3"
 	"github.com/symysak/arib/internal/std-t61/pane"
+	scpca1u264 "github.com/symysak/arib/internal/std-t61/scpc-a1u264"
 	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
@@ -252,6 +253,7 @@ type watcher struct {
 	recLast    float64
 	recReason  string
 	lastCtlRec time.Time
+	sig recSig
 
 	lastState string
 	lastNV2 string
@@ -261,6 +263,7 @@ type watcher struct {
 	ctlRun     int
 	callRun    int
 	a1u       *scpca1u292.Keyer
+	a1u264    *scpca1u264.Keyer
 	events    int
 	lastFrame time.Time
 	lostDone  bool
@@ -321,8 +324,8 @@ func (w *watcher) feedBase(y []complex64) {
 		}
 		sum += float64(a) * float64(a)
 	}
+	rms := math.Sqrt(sum / float64(len(y)))
 	if w.hook != nil && w.hook.Level != nil {
-		rms := math.Sqrt(sum / float64(len(y)))
 		w.hook.Level(20 * math.Log10(math.Max(rms, 1e-9)/math.Max(float64(w.peak), 1e-9)))
 	}
 	w.sink.IQ(y, w.rate)
@@ -348,6 +351,7 @@ func (w *watcher) feedBase(y []complex64) {
 		w.hook.Stats(w.d.Stats, w.d.CoarseHz(), w.d.CFOHz(), w.d.Locked())
 	}
 	if w.recOn {
+		w.sig.chunk(20*math.Log10(math.Max(rms, 1e-9)), w.d.CoarseHz()+w.d.CFOHz())
 		now := w.procSec()
 		if now-w.recLast > w.o.PostS || now-w.recStart > w.o.MaxS {
 			w.stopRec()
@@ -395,8 +399,6 @@ func (w *watcher) State() rx.State { return rx.State(w.state.Load()) }
 
 func (w *watcher) Snapshot(map[string]any) {}
 
-func (w *watcher) Retune() {}
-
 func (w *watcher) shareUplinkScramble(f dec.Frame) {
 	if f.UplinkScrambleFound > 0 {
 		w.sink.Log("%.4f MHz: 上りの同期バーストからスクランブルを当てた（PN 初期値 0x%03X）。この局の上りに使う", w.mhz, f.UplinkScrambleFound-1)
@@ -426,6 +428,9 @@ func (w *watcher) applyUplinkScramble() {
 
 func (w *watcher) onFrame(f dec.Frame) {
 	w.lastFrame, w.lostDone = time.Now(), false
+	if w.recOn {
+		w.sig.frame(f)
+	}
 	w.shareUplinkScramble(f)
 	var reason string
 	var cur l1.RICH
@@ -630,9 +635,23 @@ func (w *watcher) a1Trigger(f dec.Frame) string {
 		if w.a1u == nil {
 			w.a1u = scpca1u292.NewKeyer(-1, -1)
 		}
-		for _, d := range w.a1u.Feed(scpca1u292.Item{TCH1: f.TCH1, Soft: f.TCH1Soft, Tag: f.Number}) {
-			if d.Tag == f.Number && d.OK {
-				data = true
+		if w.a1u264 == nil {
+			w.a1u264 = scpca1u264.NewKeyer(-1, -1)
+		}
+		_, d292 := w.a1u.WC()
+		_, d264 := w.a1u264.WC()
+		if !d264 {
+			for _, d := range w.a1u.Feed(scpca1u292.Item{TCH1: f.TCH1, Soft: f.TCH1Soft, Tag: f.Number}) {
+				if d.Tag == f.Number && d.OK {
+					data = true
+				}
+			}
+		}
+		if !d292 && !data {
+			for _, d := range w.a1u264.Feed(scpca1u264.Item{TCH1: f.TCH1, Tag: f.Number}) {
+				if d.Tag == f.Number && d.OK {
+					data = true
+				}
 			}
 		}
 	}
@@ -692,6 +711,8 @@ func (w *watcher) startRec(reason string, f dec.Frame) {
 		return
 	}
 	w.recOn, w.recStart, w.recLast, w.recReason = true, w.procSec(), w.procSec(), reason
+	w.lastNV2 = ""
+	w.sig = recSig{}
 	w.state.Store(int32(rx.StateActive))
 	w.sink.RecNote(0, fmt.Sprintf("周波数 %.4f MHz\n開始 %s\n理由 %s\nRICH %s %s\n入力レート %.0f Hz（DDC 後、std-t61 <file> -offset 0 で再デコード可）",
 		w.mhz, time.Now().Format(time.RFC3339), reason, f.RICH.Bits17(), f.RICH.Describe(w.d.Edition()), w.rate))
@@ -708,12 +729,50 @@ func (w *watcher) startRec(reason string, f dec.Frame) {
 }
 
 func (w *watcher) stopRec() {
+	if l := w.sig.line(); l != "" {
+		w.sink.RecNote(0, l)
+	}
 	w.sink.RecClose(0, 0)
 	w.recOn = false
 	w.state.Store(int32(rx.StateIdle))
 	if w.hook != nil && w.hook.RecordStop != nil {
 		w.hook.RecordStop()
 	}
+}
+
+type recSig struct {
+	chunks, frames, richOK int
+	lev, cfo, phase, swErr float64
+}
+
+func (a *recSig) chunk(levelDB, cfoHz float64) {
+	a.chunks++
+	a.lev += levelDB
+	a.cfo += cfoHz
+}
+
+func (a *recSig) frame(f dec.Frame) {
+	if f.Flywheel {
+		return
+	}
+	a.frames++
+	a.phase += f.PhaseErrDeg
+	a.swErr += float64(f.SWErrors)
+	if f.RICH.OK || (f.A1RICH != nil && f.A1RICH.OK) {
+		a.richOK++
+	}
+}
+
+func (a recSig) line() string {
+	if a.chunks == 0 {
+		return ""
+	}
+	s := fmt.Sprintf("signal レベル %.1f dBFS・搬送波ずれ %.0f Hz", a.lev/float64(a.chunks), a.cfo/float64(a.chunks))
+	if a.frames > 0 {
+		n := float64(a.frames)
+		s += fmt.Sprintf("・位相誤差 %.1f°・同期ワードの誤り %.2f ビット・RICH %d/%d（%d フレームの平均）", a.phase/n, a.swErr/n, a.richOK, a.frames, a.frames)
+	}
+	return s
 }
 
 func (w *watcher) Summary() string {

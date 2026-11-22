@@ -51,11 +51,12 @@ type callState struct {
 	busyRun  int
 	idleRun  int
 	early    []decoder.TCHFrame
+	pending  []string
 	tchW     *bufio.Writer
 	tchF     *os.File
 	idxW     *bufio.Writer
 	idxF     *os.File
-	calls    *os.File
+	callLog  []string
 	voice    int
 	facch    int
 	init     int
@@ -68,7 +69,9 @@ type callState struct {
 	pendSrc  string
 	upFrame  int64
 	upRun    int
+	sig      sigAcc
 	lastRCH  string
+	logRCH   string
 	mode     l3.CallType
 	modeRank int
 	modeSrc  string
@@ -92,7 +95,8 @@ type Channel struct {
 
 	proc     int64
 	lastEmit float64
-	calls    [4]callState
+	curLevel, curCFO float64
+	calls            [4]callState
 	callSeq int64
 	idle   [4]*idleTCH
 	vs     voiceState
@@ -122,6 +126,7 @@ type Channel struct {
 	maker int
 	vend   vendorState
 	nowT   float64
+	nowIn  float64
 	lastT  float64
 	recOn  int
 	forget bool
@@ -140,7 +145,7 @@ func newChannel(s *Standard, c rx.ChannelConfig, sink rx.Sink) *Channel {
 	ch.newDecoder(c.StartSec)
 	ch.car.LevelDB = math.Inf(-1)
 	ch.lastEmit = math.Inf(-1)
-	ch.nowT = c.StartSec
+	ch.nowT, ch.nowIn = sink.WallSec(c.StartSec), c.StartSec
 	if s.ledgerOrgs != nil {
 		if orgs := s.ledgerOrgs(c.MHz); len(orgs) > 0 {
 			ch.org = strings.Join(orgs, " / ") + "（前回まで）"
@@ -219,9 +224,11 @@ func (c *Channel) scramble(slot int) (int, bool) {
 	return c.dec.Scramble(slot)
 }
 
-func (c *Channel) ID() int       { return c.cfg.ID }
-func (c *Channel) MHz() float64  { return c.cfg.MHz }
-func (c *Channel) tNow() float64 { return c.cfg.StartSec + float64(c.proc)/c.rate }
+func (c *Channel) ID() int      { return c.cfg.ID }
+func (c *Channel) MHz() float64 { return c.cfg.MHz }
+
+func (c *Channel) inSec() float64 { return c.cfg.StartSec + float64(c.proc)/c.rate }
+func (c *Channel) tNow() float64  { return c.sink.WallSec(c.inSec()) }
 
 func (c *Channel) Feed(wide []complex64) {
 	y := c.ddc.Process(wide)
@@ -238,7 +245,17 @@ func (c *Channel) Feed(wide []complex64) {
 		slots = c.dec.Feed(y)
 	}
 	c.proc += int64(len(y))
+	c.curLevel = level
+	if c.up == nil {
+		c.curCFO = c.dec.CoarseHz() + c.dec.CFOHz()
+	}
 	now := c.tNow()
+	for i := range slots {
+		slots[i].TSec = c.sink.WallSec(slots[i].TSec)
+		for j := range slots[i].TCH {
+			slots[i].TCH[j].TSec = c.sink.WallSec(slots[i].TCH[j].TSec)
+		}
+	}
 	for i := range slots {
 		c.handle(&slots[i], now)
 	}
@@ -254,7 +271,8 @@ func (c *Channel) Feed(wide []complex64) {
 	c.mu.Lock()
 	if c.up != nil {
 		st := c.up.Stats
-		c.car.TSec, c.car.Locked = now, c.up.LastBurstSec() >= 0 && now-c.up.LastBurstSec() < upHoldSec
+		lb := c.up.LastBurstSec()
+		c.car.TSec, c.car.Locked = now, lb >= 0 && now-c.sink.WallSec(lb) < upHoldSec
 		c.car.CoarseHz, c.car.LevelDB = 0, level
 		c.car.SlotsN, c.car.SWFound = st.Bursts, st.Bursts
 		c.car.CACOK, c.car.CACTotal, c.car.SACCHOK, c.car.SACCHN = st.CACOK, st.Control, st.SACCHOK, st.SACCHTotal
@@ -285,7 +303,7 @@ func (c *Channel) Feed(wide []complex64) {
 			c.car.Slots[n].Kind = "未同期"
 		}
 	}
-	c.nowT = now
+	c.nowT, c.nowIn = now, c.inSec()
 	car := c.car
 	car.Audio = c.mix.state()
 	emit := now-c.lastEmit >= emitSec
@@ -350,6 +368,9 @@ func (c *Channel) kindLocked() (string, int) {
 func (c *Channel) handle(s *decoder.Slot, now float64) {
 	n := s.Num
 	cs := &c.calls[n]
+	if s.Up && !cs.on && s.Frame != cs.upFrame+1 {
+		cs.dropCandidate()
+	}
 	info := SlotInfo{Num: n, SW: s.SW.Name(), SFPos: s.SFPos, ID: -1, LastT: s.TSec, CC: s.CC, PhaseE: round2(s.PhaseErrDeg)}
 	busy := false
 	switch {
@@ -495,6 +516,7 @@ func (c *Channel) handle(s *decoder.Slot, now float64) {
 		}
 		cs.idleRun = 0
 		cs.lastBusy = now
+		cs.sig.add(s, c.curLevel, c.curCFO)
 		if !cs.on && (cs.busyRun >= callStartFrames || sure) {
 			c.startCall(n, s, now)
 		}
@@ -521,7 +543,7 @@ func (c *Channel) handle(s *decoder.Slot, now float64) {
 		}
 	}
 	if !cs.on && cs.busyRun == 0 {
-		cs.early = cs.early[:0]
+		cs.dropCandidate()
 	}
 	if cs.on && s.InitKnown && (!cs.known || cs.init != s.Init) {
 		cs.init, cs.known = s.Init, true
@@ -541,8 +563,8 @@ func (c *Channel) startCall(n int, s *decoder.Slot, now float64) {
 	label := fmt.Sprintf("s%d", n)
 	base := c.sink.RecOpen(n, label, recLagSec+math.Max(0, now-s.TSec))
 	c.callSeq++
-	*cs = callState{on: true, base: base, t0: now, seq: c.callSeq, lastBusy: now, busyRun: cs.busyRun, early: cs.early, pendCall: cs.pendCall,
-		pendCtl: cs.pendCtl, pendSrc: cs.pendSrc, stats: modeStats{sbPrev: -1}, upFrame: cs.upFrame, upRun: cs.upRun,
+	*cs = callState{on: true, base: base, t0: now, seq: c.callSeq, lastBusy: now, busyRun: cs.busyRun, early: cs.early, pending: cs.pending, callLog: cs.callLog, pendCall: cs.pendCall,
+		pendCtl: cs.pendCtl, pendSrc: cs.pendSrc, stats: modeStats{sbPrev: -1}, upFrame: cs.upFrame, upRun: cs.upRun, sig: cs.sig,
 		talker: cs.talker, selcall: cs.selcall, lastPICH: cs.lastPICH, dupWith: -1, lastTalker: -1}
 	c.mu.Lock()
 	c.recOn++
@@ -558,10 +580,7 @@ func (c *Channel) startCall(n int, s *decoder.Slot, now float64) {
 	if id >= 0 {
 		c.sink.RecNote(n, fmt.Sprintf("直近の同期バーストの呼出符号 %d", id))
 	}
-	if f, err := os.Create(rec.Path(base, rec.Calls)); err == nil {
-		cs.calls = f
-		fmt.Fprintf(f, "voice_start %s ST#%d %s\n", c.sink.StreamTime().Format(time.RFC3339), n, s.SW.Name())
-	}
+	c.callEvent(n, "voice_start", fmt.Sprintf("ST#%d %s", n, s.SW.Name()))
 	if !c.std.cfg.NoTCH {
 		c.sink.RecNote(n, fmt.Sprintf("TCH: %s + %s（1 枚 = そのスロットの 40 ms ごとの TCH 256 ビット = TCH 112 ++ TCH 144、32 バイト MSB 先頭、"+
 			"デスクランブル済み。idx はスロットの無線フレーム番号 uint32 LE。FACCH が半分を使うスロットは書かない）",
@@ -575,8 +594,12 @@ func (c *Channel) startCall(n int, s *decoder.Slot, now float64) {
 	}
 	cs.tr = c.newTracker(n)
 	if c.vs.chosen != nil {
-		c.note(n, "voice_codec "+c.vs.chosen.Name+"（"+c.vs.why+"）")
+		c.callEvent(n, "voice_codec", c.vs.chosen.Name+"（"+c.vs.why+"）")
 	}
+	for _, line := range cs.pending {
+		c.note(n, line)
+	}
+	cs.pending = nil
 	for _, f := range cs.early {
 		c.writeTCH(n, f)
 		c.pushTracker(n, f)
@@ -628,10 +651,18 @@ func (c *Channel) endCall(n int, now float64, why string) {
 		_ = cs.idxW.Flush()
 		_ = cs.idxF.Close()
 	}
-	if cs.calls != nil {
-		fmt.Fprintf(cs.calls, "voice_end %s 音声 %d フレーム（%.1f 秒） FACCH %d 理由 %s\n",
-			c.sink.StreamTime().Format(time.RFC3339), cs.voice, float64(cs.voice)*0.04, cs.facch, why)
-		_ = cs.calls.Close()
+	c.callEvent(n, "voice_end", fmt.Sprintf("音声 %d フレーム（%.1f 秒） FACCH %d 理由 %s", cs.voice, float64(cs.voice)*0.04, cs.facch, why))
+	if audioSec > 0 {
+		cs.callLog = append(cs.callLog, fmt.Sprintf("音声 %.1f 秒 → %s", audioSec, rec.Path(cs.base, rec.Audio)))
+	}
+	if cs.base != "" {
+		lines := append([]string{fmt.Sprintf("%.4f MHz 録音開始（ST#%d）", c.cfg.MHz, n)}, cs.callLog...)
+		if err := os.WriteFile(rec.Path(cs.base, rec.Calls), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			c.logf(n, "record", "warn", "通話ログを書けない: %v", err)
+		}
+	}
+	if l := cs.sig.line(); cs.base != "" && l != "" {
+		c.sink.RecNote(n, l)
 	}
 	if cs.base != "" {
 		c.sink.RecNote(n, fmt.Sprintf("終了 %s 理由 %s 音声 %d フレーム FACCH %d %.1f 秒", c.sink.StreamTime().Format(time.RFC3339), why, cs.voice, cs.facch, sec))
@@ -652,13 +683,19 @@ func (c *Channel) endCall(n int, now float64, why string) {
 
 func (c *Channel) note(n int, line string) {
 	cs := &c.calls[n]
-	if !cs.on || cs.base == "" {
+	if !cs.on {
+		cs.pending = append(cs.pending, line)
+		return
+	}
+	if cs.base == "" {
 		return
 	}
 	c.sink.RecNote(n, line)
-	if cs.calls != nil {
-		fmt.Fprintln(cs.calls, line)
-	}
+}
+
+func (c *Channel) callEvent(n int, kind, text string) {
+	cs := &c.calls[n]
+	cs.callLog = append(cs.callLog, fmt.Sprintf("%9.3fs %-11s %s", c.tNow(), kind, text))
 }
 
 func (c *Channel) relName(base string) string {
@@ -690,14 +727,16 @@ func (c *Channel) Resync() {
 	for n := range c.calls {
 		c.endCall(n, now, "取りこぼし")
 	}
-	c.newDecoder(now)
-	c.proc = int64(math.Round((now - c.cfg.StartSec) * c.rate))
+	start := c.inSec()
+	if p, ok := c.sink.(rx.Positioner); ok {
+		start = math.Max(start, p.InputSec())
+	}
+	c.newDecoder(start)
+	c.proc = int64(math.Round((start - c.cfg.StartSec) * c.rate))
 	c.mu.Lock()
 	c.car.Overflows++
 	c.mu.Unlock()
 }
-
-func (c *Channel) Retune() { c.Resync() }
 
 func (c *Channel) Close(dropped bool) {
 	now := c.tNow()
@@ -761,7 +800,7 @@ func (c *Channel) LedgerMHz() (float64, bool) {
 func (c *Channel) Counters() rx.Counters {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return rx.Counters{Frames: c.car.SlotsN, Good: c.car.SWFound, ProcSec: c.nowT - c.cfg.StartSec}
+	return rx.Counters{Frames: c.car.SlotsN, Good: c.car.SWFound, ProcSec: c.nowIn - c.cfg.StartSec}
 }
 
 func (c *Channel) Summary() string {
@@ -846,6 +885,46 @@ func (c *Channel) station() Station {
 
 func hexOctets(b []byte) string {
 	return strings.ToUpper(strings.TrimSpace(fmt.Sprintf("% x", b)))
+}
+
+func (cs *callState) dropCandidate() {
+	cs.early = cs.early[:0]
+	cs.pending = cs.pending[:0]
+	cs.callLog = cs.callLog[:0]
+	cs.sig = sigAcc{}
+	cs.lastRCH, cs.lastPICH, cs.vclock = "", "", ""
+}
+
+type sigAcc struct {
+	n                         int
+	up                        bool
+	lev, phase, swErr, cfoSum float64
+}
+
+func (a *sigAcc) add(s *decoder.Slot, carLevel, carCFO float64) {
+	level, cfo := carLevel, carCFO
+	if s.Up {
+		level, cfo = s.LevelDB, s.CFOHz
+	}
+	a.n++
+	a.up = s.Up
+	a.lev += level
+	a.cfoSum += cfo
+	a.phase += s.PhaseErrDeg
+	a.swErr += float64(s.SW.Errs)
+}
+
+func (a sigAcc) line() string {
+	if a.n == 0 {
+		return ""
+	}
+	n := float64(a.n)
+	lv := fmt.Sprintf("レベル %.1f dBFS", a.lev/n)
+	if a.up {
+		lv = fmt.Sprintf("レベル（雑音の床から）%.1f dB", a.lev/n)
+	}
+	return fmt.Sprintf("signal %s・搬送波ずれ %.0f Hz・位相誤差 %.1f°・同期ワードの誤り %.2f ビット（%d スロットの平均）",
+		lv, a.cfoSum/n, a.phase/n, a.swErr/n, a.n)
 }
 
 func levelDB(y []complex64) float64 {

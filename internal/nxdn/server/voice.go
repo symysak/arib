@@ -154,6 +154,13 @@ func (c *Channel) voiceFrame(f decoder.Frame, p l1.Parsed) {
 		vf := voice.Frame{Ch: vch, No: 2*f.No + int64(h), TimeSec: f.TimeSec + float64(h)*voice.FrameSec, Sub: c.sub*2 + h}
 		tch := isVoice && p.Half[h].Kind == l1.HalfTCH
 		if tch {
+			if c.tx.rec.Voice == 0 {
+				name := ""
+				if c.vs.chosen != nil {
+					name = c.vs.chosen.Name
+				}
+				c.callEvent(vf.TimeSec, "voice_start", name)
+			}
 			vf.Bits, vf.Soft = p.Half[h].TCH, p.Half[h].TCHSoft
 			c.tx.rec.Voice++
 			c.mu.Lock()
@@ -212,7 +219,7 @@ func (c *Channel) probe(f voice.Frame, tch bool) {
 			t.tr.Finish()
 		}
 		t.tr = c.newTracker()
-		c.note("voice_note 符号器が決まった: " + cd.Name + "（" + c.vs.why + "）")
+		c.callEvent(c.tNow(), "voice_note", "符号器が決まった: "+cd.Name+"（"+c.vs.why+"）")
 		for _, h := range hist {
 			t.tr.Push(h, h.Bits != nil)
 		}
@@ -241,7 +248,7 @@ func (c *Channel) checkTrial() {
 		t.tr.Finish()
 		t.audio = nil
 		t.tr = c.newTracker()
-		c.note(fmt.Sprintf("voice_note 台帳の符号器 %s は検査が通らないので選び直す（%d/%d）", name, tr.ok, tr.n))
+		c.callEvent(c.tNow(), "voice_note", fmt.Sprintf("台帳の符号器 %s は検査が通らないので選び直す（%d/%d）", name, tr.ok, tr.n))
 	}
 }
 
@@ -335,7 +342,19 @@ func (c *Channel) newTracker() *voice.Tracker {
 		tr.OnOnset = c.gain.MarkOnset
 	}
 	tr.OnEnd = func(cl voice.Call) {
-		c.note(fmt.Sprintf("voice %s 音声 %d フレーム %s OK %d", cc.Name, cl.Frames, cc.Check, cl.OK))
+		sec := cl.TimeSec
+		if sec == 0 {
+			sec = c.tNow()
+		}
+		text := fmt.Sprintf("音声 %d フレーム（%.1f 秒） %s %s OK %d", cl.Frames, float64(cl.Frames)*voice.FrameSec, cc.Name, cc.Check, cl.OK)
+		if t.rec.Call != "" {
+			text += "・呼 " + t.rec.Call
+		}
+		if t.rec.Name != "" {
+			text += "・名前 " + t.rec.Name
+		}
+		c.callEvent(sec, "voice_end", text)
+		t.voiceEnded = true
 	}
 	tr.OnUnit = func(u voice.Unit, _, _ int64) {
 		if u.Check.Valid {
@@ -360,7 +379,7 @@ func (c *Channel) newTracker() *voice.Tracker {
 			}
 		}
 		if u.Note != "" {
-			c.note("voice_note " + u.Note)
+			c.callEvent(c.tNow(), "voice_note", u.Note)
 			c.mu.Lock()
 			c.st.Talking = true
 			c.mu.Unlock()
@@ -407,7 +426,7 @@ func (c *Channel) finishVoice() float64 {
 		c.logf("call", "warn", "音声の復号器: %v", err)
 	}
 	if st := t.tr.Snapshot(); st.Frames > 0 {
-		c.note(fmt.Sprintf("voice_stats 検査 %d/%d 欠落 %d 回（埋め %d 枚）捨て %d", st.CheckOK, st.Frames, st.Gaps, st.Filled, st.Dropped))
+		c.callEvent(c.tNow(), "voice_stats", st.Text())
 	}
 	if t.audio == nil || t.base == "" {
 		return 0
@@ -418,11 +437,14 @@ func (c *Channel) finishVoice() float64 {
 	if len(pcm) == 0 {
 		return 0
 	}
-	if err := wavio.Write(rec.Path(t.base, rec.Audio), pcm, 1, voice.SampleRate); err != nil {
+	name := rec.Path(t.base, rec.Audio)
+	if err := wavio.Write(name, pcm, 1, voice.SampleRate); err != nil {
 		c.logf("record", "warn", "音声 WAV を書けない: %v", err)
 		return 0
 	}
-	return float64(len(pcm)) / voice.SampleRate
+	sec := float64(len(pcm)) / voice.SampleRate
+	t.callLog = append(t.callLog, fmt.Sprintf("音声 %.1f 秒 → %s", sec, name))
+	return sec
 }
 
 func (c *Channel) closeVoice() {

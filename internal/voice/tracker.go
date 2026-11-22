@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"fmt"
 	"math"
 	"sync"
 )
@@ -16,11 +17,21 @@ type Stats struct {
 	Restarts  int
 }
 
+func (s Stats) Sub(b Stats) Stats {
+	return Stats{Frames: s.Frames - b.Frames, CheckOK: s.CheckOK - b.CheckOK, CheckNG: s.CheckNG - b.CheckNG, Gaps: s.Gaps - b.Gaps,
+		Filled: s.Filled - b.Filled, Dropped: s.Dropped - b.Dropped, Corrected: s.Corrected - b.Corrected, Restarts: s.Restarts - b.Restarts}
+}
+
+func (s Stats) Text() string {
+	return fmt.Sprintf("検査 %d/%d 欠落 %d 回（埋め %d 枚）捨て %d 訂正 %d ビット", s.CheckOK, s.Frames, s.Gaps, s.Filled, s.Dropped, s.Corrected)
+}
+
 type Call struct {
 	TimeSec float64
 	Frames  int
 	OK      int
 	First   []byte
+	Stats   Stats
 }
 
 const EntryRun = 2
@@ -44,6 +55,7 @@ type Tracker struct {
 
 	mu    sync.Mutex
 	stats Stats
+	callBase Stats
 
 	inCall     bool
 	gap        int
@@ -106,6 +118,7 @@ func (t *Tracker) Push(f Frame, isVoice bool) {
 		}
 		t.inCall = true
 		t.callFrames, t.callOK, t.first = 0, 0, nil
+		t.callBase = t.Snapshot()
 		if t.OnStart != nil {
 			t.OnStart(f)
 		}
@@ -318,7 +331,7 @@ func (t *Tracker) resetDecode(v Voice) {
 func (t *Tracker) end(timeSec float64) {
 	t.inCall, t.voiceRun = false, 0
 	if t.OnEnd != nil {
-		t.OnEnd(Call{TimeSec: timeSec, Frames: t.callFrames, OK: t.callOK, First: t.first})
+		t.OnEnd(Call{TimeSec: timeSec, Frames: t.callFrames, OK: t.callOK, First: t.first, Stats: t.Snapshot().Sub(t.callBase)})
 	}
 	t.havePrev = false
 	t.resetDecode(t.cur)

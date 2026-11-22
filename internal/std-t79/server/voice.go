@@ -345,7 +345,7 @@ func (c *Channel) probe(n int, f decoder.TCHFrame) {
 		}
 		c.endTracker(m)
 		cs.tr = c.newTracker(m)
-		c.note(m, "voice_note 符号器が決まった: "+cd.Name+"（"+c.vs.why+"）")
+		c.callEvent(m, "voice_note", "符号器が決まった: "+cd.Name+"（"+c.vs.why+"）")
 		for _, h := range cs.hist {
 			c.pushTracker(m, h)
 		}
@@ -388,13 +388,13 @@ func (c *Channel) newTracker(n int) *voice.Tracker {
 		tentative = " 未確定（伝送路が候補のひとつ）"
 	}
 	tr.OnEnd = func(cl voice.Call) {
-		c.note(n, fmt.Sprintf("voice %s 音声 %d フレーム %s OK %d%s", cc.Name, cl.Frames, cc.Check, cl.OK, tentative))
+		c.callEvent(n, "voice", fmt.Sprintf("%s 音声 %d フレーム %s OK %d%s", cc.Name, cl.Frames, cc.Check, cl.OK, tentative))
 	}
 	notes := map[string]bool{}
 	tr.OnUnit = func(u voice.Unit, _, _ int64) {
 		if u.Note != "" && !notes[u.Note] {
 			notes[u.Note] = true
-			c.note(n, "voice_note "+u.Note)
+			c.callEvent(n, "voice_note", u.Note)
 		}
 	}
 	return tr
@@ -430,7 +430,7 @@ func (c *Channel) finishVoice(n int) float64 {
 			c.logf(n, "call", "warn", "ST#%d の音声の復号器: %v", n, err)
 		}
 		if st := cs.tr.Snapshot(); st.Frames > 0 {
-			c.note(n, fmt.Sprintf("voice_stats 検査 %d/%d 欠落 %d 回（埋め %d 枚）捨て %d", st.CheckOK, st.Frames, st.Gaps, st.Filled, st.Dropped))
+			c.callEvent(n, "voice_stats", st.Text())
 		}
 	}
 	if cs.audio == nil || cs.base == "" {
@@ -442,7 +442,8 @@ func (c *Channel) finishVoice(n int) float64 {
 	if len(pcm) == 0 {
 		return 0
 	}
-	if err := wavio.Write(rec.Path(cs.base, rec.Audio), pcm, 1, voice.SampleRate); err != nil {
+	name := rec.Path(cs.base, rec.Audio)
+	if err := wavio.Write(name, pcm, 1, voice.SampleRate); err != nil {
 		c.logf(n, "record", "warn", "音声 WAV を書けない: %v", err)
 		return 0
 	}

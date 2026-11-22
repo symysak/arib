@@ -142,12 +142,14 @@ func (c *Channel) noteRCH(s *decoder.Slot) {
 	}
 	text := c.rchText(r.Info, s.Up)
 	cs := &c.calls[s.Num]
-	if text == cs.lastRCH {
-		return
+	if text != cs.lastRCH {
+		cs.lastRCH = text
+		c.note(s.Num, fmt.Sprintf("rch %d %s", s.Frame, text))
 	}
-	cs.lastRCH = text
-	c.note(s.Num, fmt.Sprintf("rch %d %s", s.Frame, text))
-	if text != "アイドル" {
-		c.logf(s.Num, "call", "info", "ST#%d RCH%s %s", s.Num, map[bool]string{true: "↑", false: ""}[s.Up], text)
+	if text != cs.logRCH {
+		cs.logRCH = text
+		if text != "アイドル" {
+			c.logf(s.Num, "call", "info", "ST#%d RCH%s %s", s.Num, map[bool]string{true: "↑", false: ""}[s.Up], text)
+		}
 	}
 }

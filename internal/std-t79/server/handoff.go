@@ -75,7 +75,7 @@ func (c *Channel) checkHandoff(n int) {
 	}
 	text := fmt.Sprintf("前の通話 %.4f MHz ST#%d（%.1f 秒前に終了）から %.4f MHz ST#%d へ。発着番号 %s が同じ（再発呼型のチャネル切替とみる。推定）",
 		prev.mhz, prev.slot, cs.t0-prev.t, c.cfg.MHz, n, peerKey(cs.peer))
-	c.note(n, "handoff "+text+"・前の録音 "+c.relName(prev.base))
+	c.callEvent(n, "handoff", text+"・前の録音 "+c.relName(prev.base))
 	c.logf(n, "call", "info", "ハンドオフ（推定）: %s", text)
 	c.emitCall(CallRec{TSec: c.tNow(), Slot: n, Channel: "CC", Kind: "ハンドオフ（推定）", Text: text, ToSlot: -1, Ref: -1, ID: -1, MHz: prev.mhz})
 }

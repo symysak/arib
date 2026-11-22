@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -66,9 +68,10 @@ type Channel struct {
 
 	nFrames, nGood atomic.Int64
 	nCRC           atomic.Int64
-	strong map[int]map[string]bool
+	trusted map[int]bool
 	lastInit int
 	procSec  atomic.Uint64
+	procIn   atomic.Uint64
 
 	mu        sync.Mutex
 	st        Station
@@ -80,28 +83,63 @@ type Channel struct {
 	level     *float64
 }
 
+type sigAcc struct {
+	n, nLevel              int
+	dev, dc, evm, fsw, lev float64
+}
+
+func (a *sigAcc) add(f decoder.Frame, level *float64) {
+	a.n++
+	a.dev += f.DevHz
+	a.dc += f.DCHz
+	a.evm += f.EVM
+	a.fsw += float64(f.FSWErr)
+	if level != nil {
+		a.nLevel++
+		a.lev += *level
+	}
+}
+
+func (a sigAcc) line() string {
+	if a.n == 0 {
+		return ""
+	}
+	n := float64(a.n)
+	lv := "-"
+	if a.nLevel > 0 {
+		lv = fmt.Sprintf("%.1f dBFS", a.lev/float64(a.nLevel))
+	}
+	return fmt.Sprintf("signal レベル %s・偏移 %.0f Hz・DC %.0f Hz・EVM %.3f・同期ワードの誤り %.2f ビット（%d フレームの平均）",
+		lv, a.dev/n, a.dc/n, a.evm/n, a.fsw/n, a.n)
+}
+
 type txState struct {
 	rec      TxRec
 	base     string
-	calls    *os.File
 	tch, idx *os.File
 	tr       *voice.Tracker
 	audio    *audioBuf
 	endSeen  bool
 	opened   bool
+	callLog    []string
+	voiceEnded bool
+	sig sigAcc
 	crcSeen bool
+	strong int
+	pending []string
 	lastT   float64
 }
 
 func newChannel(s *Standard, c rx.ChannelConfig, sink rx.Sink, opt ChannelOpt) *Channel {
-	ch := &Channel{std: s, cfg: c, sink: sink, opt: opt, watched: true, lastMsg: map[string]*MsgRec{}, strong: map[int]map[string]bool{}, lastInit: -1}
+	ch := &Channel{std: s, cfg: c, sink: sink, opt: opt, watched: true, lastMsg: map[string]*MsgRec{}, trusted: map[int]bool{}, lastInit: -1}
 	bank, _ := c.Front.(*chanbank.Bank)
 	ch.d = decoder.New(decoder.Config{SampleRate: c.FsIn, OffsetHz: c.OffHz, StartSec: c.StartSec, Bank: bank})
 	ch.keyer = s.keyer(opt.Init)
 	if s.spec.DataChannel != "" {
 		ch.dataSt = data.NewStation(s.spec.DataChannel, s.cfg.Data)
 	}
-	ch.setProc(c.StartSec)
+	ch.setProc(sink.WallSec(c.StartSec))
+	ch.procIn.Store(math.Float64bits(c.StartSec))
 	ch.st = Station{Idx: c.ID, MHz: c.MHz, OffsetHz: c.OffHz, Init: -1, U: -1, Maker: -1, Ext: map[string]any{}}
 	if init, ok := ch.keyer.Init(); ok {
 		ch.st.Init, ch.st.InitWhy = init, ch.keyer.Why()
@@ -136,7 +174,11 @@ func (c *Channel) FeedFront(_ []complex64, prep any) {
 
 func (c *Channel) afterFeed(frames []decoder.Frame) {
 	c.sink.IQ(c.d.IQ, dsp.Fs)
-	c.setProc(c.d.ProcessedSec())
+	c.setProc(c.sink.WallSec(c.d.ProcessedSec()))
+	c.procIn.Store(math.Float64bits(c.d.ProcessedSec()))
+	for i := range frames {
+		frames[i].TimeSec = c.sink.WallSec(frames[i].TimeSec)
+	}
 	if lv := c.d.LevelDB(); !math.IsInf(lv, 0) {
 		c.mu.Lock()
 		c.level = &lv
@@ -154,7 +196,12 @@ func (c *Channel) afterFeed(frames []decoder.Frame) {
 func (c *Channel) Resync() {
 	now := c.tNow()
 	c.endTx(now, "取りこぼし")
-	c.d.Reset(now)
+	start := c.d.ProcessedSec()
+	if p, ok := c.sink.(rx.Positioner); ok {
+		start = math.Max(start, p.InputSec())
+	}
+	c.d.Reset(start)
+	c.setProc(c.sink.WallSec(start))
 	c.pend = nil
 	c.link.Reset()
 	c.mu.Lock()
@@ -163,20 +210,6 @@ func (c *Channel) Resync() {
 	c.mu.Unlock()
 	if n == 1 || n%100 == 0 {
 		c.logf("system", "warn", "復号が追いつかず入力を捨てたので仕切り直した（累計 %d 回）", n)
-	}
-}
-
-func (c *Channel) Retune() {
-	now := c.tNow()
-	c.endTx(now, "同調し直し")
-	c.d.Reset(now)
-	c.pend = nil
-	c.link.Reset()
-	if c.opt.Init < 0 && c.std.spec.Init == nil {
-		c.keyer = c.std.keyer(-1)
-		c.mu.Lock()
-		c.st.Init, c.st.InitWhy = -1, ""
-		c.mu.Unlock()
 	}
 }
 
@@ -197,7 +230,7 @@ func (c *Channel) Lock() (bool, float64, string) {
 }
 
 func (c *Channel) Counters() rx.Counters {
-	return rx.Counters{Frames: int(c.nFrames.Load()), Good: int(c.nGood.Load()), ProcSec: c.tNow() - c.cfg.StartSec}
+	return rx.Counters{Frames: int(c.nFrames.Load()), Good: int(c.nGood.Load()), ProcSec: math.Float64frombits(c.procIn.Load()) - c.cfg.StartSec}
 }
 
 func (c *Channel) Summary() string {
@@ -230,6 +263,7 @@ func (c *Channel) Snapshot(ext map[string]any) {
 func (c *Channel) Close(dropped bool) {
 	if !dropped {
 		for _, f := range c.d.Flush() {
+			f.TimeSec = c.sink.WallSec(f.TimeSec)
 			c.onFrame(f)
 		}
 	}
@@ -280,6 +314,9 @@ func (c *Channel) onFrame(f decoder.Frame) {
 	if c.tx != nil {
 		c.tx.lastT = f.TimeSec
 		c.tx.rec.Frames++
+		if !f.Inertia {
+			c.tx.sig.add(f, c.level)
+		}
 	}
 	if f.Inertia {
 		c.pushVoiceGap(f)
@@ -301,8 +338,14 @@ func (c *Channel) onFrame(f decoder.Frame) {
 	fs := c.pend[len(c.pend)-len(kds):]
 	c.pend = nil
 	if c.tx != nil && !c.tx.crcSeen {
+		n := c.tx.strong
 		for _, kd := range kds {
-			if kd.Parsed.Layout.Valid && c.crcProof(kd.Parsed, false) {
+			p := kd.Parsed
+			if !p.Layout.Valid {
+				continue
+			}
+			n += l1.Strong(p)
+			if n >= proofStrong || c.crcProof(p) {
 				c.tx.crcSeen = true
 				break
 			}
@@ -328,11 +371,13 @@ func (c *Channel) onKey(init int) {
 	if c.lastInit >= 0 && c.lastInit != init {
 		c.nGood.Store(0)
 		c.nCRC.Store(0)
+		if c.tx != nil {
+			c.tx.strong = 0
+		}
 	}
 	c.lastInit = init
 	c.shareKey()
 	c.logf("station", "info", "ホワイトニングの初期値 0x%03X（%s）", init, why)
-	c.note(fmt.Sprintf("whitening 0x%03X %s", init, why))
 }
 
 func (c *Channel) onKeyed(f decoder.Frame, kd l1.Keyed) {
@@ -368,7 +413,17 @@ func (c *Channel) onKeyed(f decoder.Frame, kd l1.Keyed) {
 	c.st.CRCOK += crcOK
 	c.st.CRCAll += crcAll
 	c.mu.Unlock()
-	if valid && c.crcProof(p, true) {
+	if n := l1.Strong(p); valid && c.tx != nil && n > 0 {
+		c.tx.strong += n
+		if c.tx.strong >= proofStrong {
+			c.tx.crcSeen = true
+			if init, ok := c.keyer.Init(); ok && !c.trustedInit(init) {
+				c.trusted[init] = true
+				c.logf("station", "info", "ホワイトニングの初期値 0x%03X を信じる（1 回の送信で長い CRC か AMBE+2 の検査が通った欄が %d）", init, c.tx.strong)
+			}
+		}
+	}
+	if valid && c.crcProof(p) {
 		c.nCRC.Add(1)
 		if c.tx != nil {
 			c.tx.crcSeen = true
@@ -450,28 +505,13 @@ func (c *Channel) shareKey() {
 	}
 }
 
-func (c *Channel) crcProof(p l1.Parsed, commit bool) bool {
+func (c *Channel) crcProof(p l1.Parsed) bool {
 	init, ok := c.keyer.Init()
-	keys := strongKeys(p)
-	if len(keys) > 0 {
-		if !ok || c.trustedInit(init) {
-			return true
-		}
-		seen := c.strong[init]
-		fresh := false
-		for _, k := range keys {
-			if !seen[k] {
-				fresh = true
-				if commit {
-					if seen == nil {
-						seen = map[string]bool{}
-						c.strong[init] = seen
-					}
-					seen[k] = true
-				}
-			}
-		}
-		return fresh
+	if !ok || !c.trustedInit(init) {
+		return false
+	}
+	if longCRC(p) {
+		return true
 	}
 	if p.SACCH == nil || !p.SACCH.CRCOK {
 		return false
@@ -484,32 +524,22 @@ func (c *Channel) crcProof(p l1.Parsed, commit bool) bool {
 	if f := c.std.spec.SACCHProof; f != nil && !f(p) {
 		return false
 	}
-	return ok && c.trustedInit(init)
+	return true
 }
 
-const strongTrust = 2
+const proofStrong = 3
 
 func (c *Channel) trustedInit(init int) bool {
-	return c.opt.Init >= 0 || c.std.defaultInit(init) || len(c.strong[init]) >= strongTrust
+	return c.opt.Init >= 0 || c.std.defaultInit(init) || c.trusted[init]
 }
 
-func strongKeys(p l1.Parsed) []string {
-	var keys []string
-	add := func(k string) {
-		if !slices.Contains(keys, k) {
-			keys = append(keys, k)
-		}
-	}
+func longCRC(p l1.Parsed) bool {
 	for _, h := range p.Half {
 		if h.Coded != nil && h.Coded.CRCOK {
-			b := l1.CodedBytes(h.Coded)
-			add("F" + string(b[:]))
+			return true
 		}
 	}
-	if d := p.Data; d != nil && d.CRCOK {
-		add(fmt.Sprintf("D%d/%d/", p.RICH, d.Head) + string(d.Body[:]))
-	}
-	return keys
+	return p.Data != nil && p.Data.CRCOK
 }
 
 func (c *Channel) setU(u int) {
@@ -524,6 +554,7 @@ func (c *Channel) setU(u int) {
 
 func (c *Channel) startTx(f decoder.Frame) {
 	c.tx = &txState{rec: TxRec{Idx: c.cfg.ID, TSec: f.TimeSec, Open: true, Kind: "不明", U: -1, Maker: -1, D: -1}, lastT: f.TimeSec}
+	c.lastMsg = map[string]*MsgRec{}
 	c.link.TxStart()
 }
 
@@ -542,12 +573,12 @@ func (c *Channel) openTx() {
 	t.base = c.sink.RecOpen(0, fmt.Sprintf("tx%d", t.rec.ID), lag)
 	t.rec.Base = t.base
 	if t.base != "" {
-		if fh, err := os.Create(rec.Path(t.base, rec.Calls)); err == nil {
-			t.calls = fh
-		}
-		c.note(fmt.Sprintf("tx_start %.3f", t.rec.TSec))
+		c.note(fmt.Sprintf("tx_start %.3f %s %.5f MHz", t.rec.TSec, c.wallAt(t.rec.TSec), c.cfg.MHz))
 		if init, ok := c.keyer.Init(); ok {
 			c.note(fmt.Sprintf("whitening 0x%03X %s", init, c.keyer.Why()))
+		}
+		for _, line := range t.pending {
+			c.note(line)
 		}
 		c.emitRec(true, "送信", 0, false)
 	}
@@ -581,14 +612,24 @@ func (c *Channel) endTx(now float64, why string) {
 	}
 	c.link.TxEnd(t.lastT, true)
 	audioSec := c.finishVoice()
+	if t.rec.Voice > 0 && !t.voiceEnded {
+		c.callEvent(t.lastT, "voice_end", fmt.Sprintf("音声 %d フレーム（%.1f 秒） 符号器なし", t.rec.Voice, float64(t.rec.Voice)*voice.FrameSec))
+	}
 	t.rec.Open = false
 	t.rec.EndSec = math.Max(t.lastT+l1.FrameSec, t.rec.TSec)
 	t.rec.End = why
 	t.rec.Audio = audioSec > 0
 	sec := t.rec.EndSec - t.rec.TSec
-	c.note(fmt.Sprintf("tx_end %.3f %s（%d フレーム・%.2f 秒）", t.rec.EndSec, why, t.rec.Frames, sec))
-	if t.calls != nil {
-		t.calls.Close()
+	if l := t.sig.line(); l != "" {
+		c.note(l)
+	}
+	c.note(txInfo(t.rec))
+	c.note(fmt.Sprintf("tx_end %.3f %s %s（%d フレーム・%.2f 秒）", t.rec.EndSec, c.wallAt(t.rec.EndSec), why, t.rec.Frames, sec))
+	if t.base != "" && len(t.callLog) > 0 {
+		lines := append([]string{fmt.Sprintf("%.5f MHz 録音開始（送信 tx%d）", c.cfg.MHz, t.rec.ID)}, t.callLog...)
+		if err := os.WriteFile(rec.Path(t.base, rec.Calls), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			c.logf("record", "warn", "通話ログを書けない: %v", err)
+		}
 	}
 	if t.tch != nil {
 		t.tch.Close()
@@ -608,15 +649,52 @@ func (c *Channel) endTx(now float64, why string) {
 	c.publish(true)
 }
 
+func (c *Channel) wallAt(sec float64) string {
+	return c.std.cfg.Origin.Add(time.Duration(sec * float64(time.Second))).Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+func txInfo(r TxRec) string {
+	num := func(v int) string {
+		if v < 0 {
+			return "-"
+		}
+		return strconv.Itoa(v)
+	}
+	str := func(s string) string {
+		if s == "" {
+			return "-"
+		}
+		return s
+	}
+	line := fmt.Sprintf("tx_info 種類 %s・U %s・D %s・製造者 %s・呼 %s・名前 %s・音声 %d/%d・データ %d",
+		r.Kind, num(r.U), num(r.D), num(r.Maker), str(r.Call), str(r.Name), r.VoiceOK, r.Voice, r.Data)
+	keys := slices.Sorted(maps.Keys(r.Ext))
+	for _, k := range keys {
+		line += fmt.Sprintf("・%s %v", k, r.Ext[k])
+	}
+	return line
+}
+
 func (c *Channel) note(line string) {
 	t := c.tx
-	if t == nil || t.base == "" {
+	if t == nil {
+		return
+	}
+	if !t.opened {
+		t.pending = append(t.pending, line)
+		return
+	}
+	if t.base == "" {
 		return
 	}
 	c.sink.RecNote(0, line)
-	if t.calls != nil {
-		fmt.Fprintln(t.calls, line)
+}
+
+func (c *Channel) callEvent(sec float64, kind, text string) {
+	if c.tx == nil {
+		return
 	}
+	c.tx.callLog = append(c.tx.callLog, fmt.Sprintf("%9.3fs %-11s %s", sec, kind, text))
 }
 
 func (c *Channel) emitRec(open bool, reason string, sec float64, audio bool) {
@@ -678,7 +756,7 @@ func (c *Channel) writeTCH(no int64, p l1.Parsed) {
 
 
 func (c *Channel) emitMsg(m *MsgRec) bool {
-	if prev := c.lastMsg[m.Msg.Ch]; prev != nil && prev.Key == m.Key && m.TSec-prev.TSec < 60 {
+	if prev := c.lastMsg[m.Msg.Ch]; prev != nil && prev.Key == m.Key {
 		prev.Repeat++
 		prev.TSec = m.TSec
 		r := *prev
@@ -690,7 +768,11 @@ func (c *Channel) emitMsg(m *MsgRec) bool {
 	cp := *m
 	c.lastMsg[m.Msg.Ch] = &cp
 	c.sink.Emit(Event{Type: EvMsg, Msg: m})
-	c.note(fmt.Sprintf("msg %s %s", m.Msg.Ch, m.Msg.Summary))
+	off := 0.0
+	if c.tx != nil {
+		off = m.TSec - c.tx.rec.TSec
+	}
+	c.note(fmt.Sprintf("msg %s %s | +%.3f s | %X", m.Msg.Ch, m.Msg.Summary, off, m.Msg.Raw))
 	return true
 }
 
@@ -823,7 +905,7 @@ func (c *Channel) eye(f decoder.Frame) {
 // Logf は画面と端末のログ。
 func (c *Channel) Logf(group, level, format string, a ...any) { c.logf(group, level, format, a...) }
 
-// Note は送信の記録（サイドカーと calls.txt）へ 1 行。
+// Note は送信の記録（サイドカー .txt）へ 1 行。
 func (c *Channel) Note(line string) { c.note(line) }
 
 // EmitData はデータの出来事を流す。

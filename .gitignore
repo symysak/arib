@@ -11,8 +11,6 @@
 /std-t102.exe
 /fdma
 /fdma.exe
-/jrcl
-/jrcl.exe
 /elcelp
 /elcelp.exe
 /arib
@@ -68,3 +66,6 @@ notice-accepted
 /data/std-t102/
 # 総務省の無線局等情報検索から作る表の取得途中の頁（scripts/std-t98/fetch_licensees.py。表そのもの data/musen/*.tsv.gz は追跡する）
 /data/musen/*.parts/
+
+# 解析用の使い捨てのフォルダ（リポジトリ直下の zz_*。中に main.go があると go build ./... の対象にもなる）
+/zz_*/

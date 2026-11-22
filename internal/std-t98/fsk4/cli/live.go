@@ -25,7 +25,7 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 		Lock:   "RICH が規定どおり読め（4 枚以上）、SACCH か PICH の CRC が通るか（2 枚以上）",
 		Preset: chplan.Frequencies(), PresetName: "規格の割当周波数（登録局・上空・免許局・中継・150 MHz 帯。入力の帯域に入る波だけ）"})
 	pre := fs.Float64("pre", 2, "送信の I/Q 録音のプリロール [s]（送信と決まった瞬間より前を遡って残す）")
-	noIQ := fs.Bool("no-iq", false, "送信の I/Q を書かない（サイドカー・calls.txt・TCH・音声だけ残す。I/Q は 24 kHz 2ch int16 = 96 kB/s）")
+	noIQ := fs.Bool("no-iq", false, "送信の I/Q を書かない（サイドカー・通話ログ・TCH・音声だけ残す。I/Q は 24 kHz 2ch int16 = 96 kB/s）")
 	noTCH := fs.Bool("no-tch", false, "TCH の生ビット（tch.bin / tch.idx）を書かない")
 	codec := fs.String("codec", "auto", "音声の符号器（auto / off / "+server.CodecNames()+"）。auto は TCH で各符号器の伝送路の検査を数えて選ぶ")
 	audioAGC := fs.Bool("audio-agc", true, "復号した音声の音量を局ごとにそろえる（自動利得調整。ゲート −70 dBFS・最大 +42 dB。false で素のまま）")
@@ -58,7 +58,7 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 1 局 = 1 チャネル（6.25 kHz・4 値 FSK 2400 シンボル/s・80 ms フレーム）。基地局も制御チャネルも無い直接通信で、送信ボタンを押した間しか
 電波が出ない。同期ワード CDF59 でフレームを切り出し、ホワイトニング（規格の初期値）を外して、同期バーストの呼出名称（PICH）・SACCH の
 通話識別とユーザコード・TCH（音声 / 非音声）を読む。秘話通信（秘話スクランブル。15 ビットの鍵）は -key の鍵で外し、無ければ通話の中で当てる。
-送信ごとに録音する: %[2]s（I/Q）・%[3]s（サイドカー）・%[4]s（送信の出入り・メッセージ）・
+送信ごとに録音する: %[2]s（I/Q）・%[3]s（サイドカー = 送信の出入り・メッセージ・送信の属性）・%[4]s（通話ログ = 音声のある送信の出入りと検査）・
 %[5]s + %[6]s（TCH 2 × 144 ビット/80 ms、ホワイトニングを外したもの）・音声 %[7]s（-codec の符号器で鳴ったとき）。
 ブラウザで http://<addr>/ を開くと、局一覧・チャネル表・無線機（呼出名称）・グループ（ユーザコード）・送信・L1 / メッセージのインスペクタを
 実時刻で表示する。入力の終端で受信は止まり、画面は見られるまま残る。Ctrl-C で録音を閉じて終了する。

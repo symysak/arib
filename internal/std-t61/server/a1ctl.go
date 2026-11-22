@@ -9,11 +9,10 @@ import (
 	dec "github.com/symysak/arib/internal/std-t61/decoder"
 	"github.com/symysak/arib/internal/std-t61/l1"
 	scpca1f40 "github.com/symysak/arib/internal/std-t61/scpc-a1f40"
-	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
 type a1Res struct {
-	U   *scpca1u292.Result
+	U   uRes
 	Ctl *ctlRes
 }
 

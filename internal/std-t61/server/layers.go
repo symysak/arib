@@ -8,6 +8,7 @@ import (
 	"github.com/symysak/arib/internal/std-t61/l1"
 	"github.com/symysak/arib/internal/std-t61/l2"
 	scpca1f40 "github.com/symysak/arib/internal/std-t61/scpc-a1f40"
+	scpca1u264 "github.com/symysak/arib/internal/std-t61/scpc-a1u264"
 	scpca1u292 "github.com/symysak/arib/internal/std-t61/scpc-a1u292"
 )
 
@@ -271,7 +272,7 @@ func buildA1Tree(f dec.Frame, a a1Res) []Node {
 	tch := Node{Label: "TCH1", Value: fmt.Sprintf("%d ビット", len(f.TCH1)),
 		Range: rangeOf(l1.A1DataStart+l1.A1RICHBits, l1.A1DataStart+l1.A1RICHBits+l1.A1TCH1Bits),
 		Note:  "スクランブル（PN(9,5)、パターン番号は規格が規定しない）を掛けたまま。中身の組立は規格が規定しない"}
-	if u != nil {
+	if u := u.U292; u != nil {
 		v := "CRC 不一致"
 		switch {
 		case u.IsIdle():
@@ -281,6 +282,16 @@ func buildA1Tree(f dec.Frame, a a1Res) []Node {
 		}
 		tch.Children = append(tch.Children, Node{Label: "本体 174 ビット", Value: v,
 			Note: fmt.Sprintf("伝送路 %s（wc=%d → 18×17 → K=5 率 2/3 → CRC-16/GENIBUS）。訂正 %d ビット", scpca1u292.Name, u.WC, u.Corrected)})
+	}
+	if u := u.U264; u != nil {
+		v := uWords(u)
+		if !u.OK {
+			v = "いつも 0 の区間が合わない（鍵違いか壊れた枚）"
+		}
+		tch.Children = append(tch.Children, Node{Label: "本体 264 ビット（16 ビットの語）", Value: v,
+			Note: fmt.Sprintf("伝送路 %s（2 ビット × 8 列 → 5 本の流れの PN(9,5) wc=%d）。いつも 0 の区間の 1 は %d ビット。検査 28 ビットの作りは未詳",
+				scpca1u264.Name, u.WC, u.ZeroErr)},
+			Node{Label: "検査 28 ビット", Value: bitString(u.Check), Note: "本体から XOR で決まるが作りは未詳"})
 	}
 	if c := a.Ctl; c != nil {
 		v := "CRC 不一致（鍵がまだ決まらないか壊れた枚）"
@@ -292,4 +303,12 @@ func buildA1Tree(f dec.Frame, a a1Res) []Node {
 	}
 	phys.Children = append(phys.Children, rich, tch)
 	return []Node{phys}
+}
+
+func bitString(b []uint8) string {
+	out := make([]byte, len(b))
+	for i, x := range b {
+		out[i] = '0' + x&1
+	}
+	return string(out)
 }

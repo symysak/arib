@@ -158,6 +158,29 @@ func Score(p Parsed) int {
 	return s
 }
 
+func Strong(p Parsed) int {
+	n := 0
+	for _, h := range p.Half {
+		switch {
+		case h.Coded != nil && h.Coded.CRCOK:
+			n++
+		case h.Kind == HalfTCH && len(h.TCH) == TCHBits:
+			for j := 0; j < 2; j++ {
+				var a [ambe.Bits3600]uint8
+				copy(a[:], h.TCH[72*j:72*j+72])
+				if ambe.Valid3600(a) {
+					n++
+					break
+				}
+			}
+		}
+	}
+	if p.Data != nil && p.Data.CRCOK {
+		n++
+	}
+	return n
+}
+
 func (k *Keyer) decide() bool {
 	for _, h := range k.hints {
 		if k.score[h] >= keyHintDecide {

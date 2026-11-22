@@ -42,6 +42,11 @@ type FrontChannel interface {
 type Chunk struct {
 	IQ   []complex64
 	Prep any
+	Pos int64
+}
+
+type Positioner interface {
+	InputSec() float64
 }
 
 type DetectorConfig struct {
@@ -63,7 +68,6 @@ type Channel interface {
 	Summary() string
 	State() State
 	Snapshot(ext map[string]any)
-	Retune()
 	Close(dropped bool)
 }
 
@@ -92,6 +96,7 @@ type Sink interface {
 	Log(format string, a ...any)
 	Emit(ev any)
 	StreamTime() time.Time
+	WallSec(sec float64) float64
 	IQ(y []complex64, rate float64)
 	RecOpen(id int, label string, lagSec float64) string
 	RecNote(id int, line string)

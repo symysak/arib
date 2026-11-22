@@ -77,7 +77,7 @@ func NewMonitor(spec Spec, cfg Config) *Monitor {
 	if cfg.Init != nil {
 		init = *cfg.Init
 	}
-	m.std = NewStandard(spec, StdConfig{LogDir: ec.LogDir, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: cfg.Data, Init: init,
+	m.std = NewStandard(spec, StdConfig{LogDir: ec.LogDir, Origin: t0, Codec: cfg.Codec, CodecOpt: cfg.CodecOpt, Data: cfg.Data, Init: init,
 		Opts: cfg.Opts, Lossless: !iqsrc.IsNetwork(ec.Source), NoTCH: cfg.NoTCH, AudioAGC: cfg.AudioAGC})
 	m.std.audio = m.onAudio
 	m.std.hooks = &stdHooks{opened: m.opened, closed: m.closed}

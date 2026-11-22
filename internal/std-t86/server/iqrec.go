@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strings"
 
 	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/rx"
@@ -27,6 +28,44 @@ type iqRecording struct {
 	tailLeft int
 	hasTail  bool
 	note     string
+	sig      sigAcc
+}
+
+type sigAcc struct {
+	nLevel, nEVM, nCFO int
+	level, evm, cfo    float64
+}
+
+func (a *sigAcc) add(level, evm, cfo *float64) {
+	if level != nil {
+		a.nLevel++
+		a.level += *level
+	}
+	if evm != nil {
+		a.nEVM++
+		a.evm += *evm
+	}
+	if cfo != nil {
+		a.nCFO++
+		a.cfo += *cfo
+	}
+}
+
+func (a sigAcc) line() string {
+	var parts []string
+	if a.nLevel > 0 {
+		parts = append(parts, fmt.Sprintf("レベル %.1f dBFS", a.level/float64(a.nLevel)))
+	}
+	if a.nEVM > 0 {
+		parts = append(parts, fmt.Sprintf("EVM（中央値）%.1f %%", a.evm/float64(a.nEVM)))
+	}
+	if a.nCFO > 0 {
+		parts = append(parts, fmt.Sprintf("搬送波ずれ %.0f Hz", a.cfo/float64(a.nCFO)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "信号: " + strings.Join(parts, "・") + fmt.Sprintf("（通報中の 1 秒ごとの値 %d 個の平均）", max(a.nLevel, a.nEVM, a.nCFO))
 }
 
 type iqRec struct {
@@ -137,6 +176,12 @@ func (r *iqRec) windowClosed(wid int) {
 	r.rec.hasTail = true
 }
 
+func (r *iqRec) addSignal(level, evm, cfo *float64) {
+	if r.rec != nil && !r.rec.hasTail {
+		r.rec.sig.add(level, evm, cfo)
+	}
+}
+
 func (r *iqRec) report(final bool) {
 	cur := r.rec
 	cur.reported = cur.samples
@@ -158,6 +203,9 @@ func (r *iqRec) finalize() {
 	rec := r.rec
 	if rec == nil {
 		return
+	}
+	if l := rec.sig.line(); l != "" {
+		r.sink.RecNote(rec.wid, l)
 	}
 	if rec.note != "" {
 		r.sink.RecNote(rec.wid, "注記: "+rec.note)

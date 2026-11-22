@@ -106,6 +106,9 @@ func (p *Pipeline) profile(s *stationState) Profile {
 		if wc, ok := s.a1.key.WC(); ok {
 			impl = append(impl, "付録 1 U u292")
 			out.Keys = append(out.Keys, KV{"WC（データ U）", fmt.Sprintf("%d（0x%03X）", wc, wc)})
+		} else if wc, ok := s.a1.k264.WC(); ok {
+			impl = append(impl, "付録 1 U u264")
+			out.Keys = append(out.Keys, KV{"WC（データ U・u264）", fmt.Sprintf("%d（0x%03X）", wc, wc)})
 		}
 	}
 	if s.ctl != nil {

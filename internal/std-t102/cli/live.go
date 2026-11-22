@@ -25,7 +25,7 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 		Lock:   "ホワイトニングの初期値を当てて RICH が規定どおり読めるか（4 枚以上）",
 		Preset: server.B54Channels(), PresetName: "ARIB STD-B54 付録 1 の 160 MHz 帯の割当周波数（低群・高群。入力の帯域に入る波だけ）"})
 	pre := fs.Float64("pre", 2, "送信の I/Q 録音のプリロール [s]（送信と決まった瞬間より前を遡って残す）")
-	noIQ := fs.Bool("no-iq", false, "送信の I/Q を書かない（サイドカー・calls.txt・TCH・音声だけ残す。I/Q は 24 kHz 2ch int16 = 96 kB/s）")
+	noIQ := fs.Bool("no-iq", false, "送信の I/Q を書かない（サイドカー・通話ログ・TCH・音声だけ残す。I/Q は 24 kHz 2ch int16 = 96 kB/s）")
 	noTCH := fs.Bool("no-tch", false, "TCH の生ビット（tch.bin / tch.idx）を書かない")
 	codec := fs.String("codec", "auto", "音声の符号器（auto / off / "+server.CodecNames()+"）。auto は TCH で各符号器の伝送路の検査を数えて選ぶ")
 	dataFmt := fs.String("data", data.Auto, "データ（UDCH1 / FACCH2）の書式（auto / off / "+data.Names(l1.DataChannel)+"）。auto は書式の検査で選ぶ")
@@ -54,7 +54,7 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 
 1 局 = 1 チャネル（6.25 kHz・4 値 FSK 2400 シンボル/s・80 ms フレーム）。同期ワード CDF59 でフレームを切り出し、
 ホワイトニングの初期値（規格は網ごとに任せている）を CRC と AMBE+2 の検査で当て、RICH・SACCH・FACCH1・TCH・UDCH1/FACCH2 を読む。
-送信（バースト）ごとに録音する: %[2]s（I/Q）・%[3]s（サイドカー）・%[4]s（送信の出入り・メッセージ・データ）・
+送信（バースト）ごとに録音する: %[2]s（I/Q）・%[3]s（サイドカー = 送信の出入り・メッセージ・データ・送信の属性）・%[4]s（通話ログ = 音声のある送信の出入りと検査）・
 %[5]s + %[6]s（TCH 2 × 144 ビット/80 ms、ホワイトニングを外したもの）・音声 %[7]s（-codec の符号器で鳴ったとき）。
 データの出来事（位置・電文）は <log-dir>/%[8]s/data/<日付>_<MHz>MHz.tsv にも書く。
 ブラウザで http://<addr>/ を開くと、局一覧・送信・地図・L1 / メッセージのインスペクタを実時刻で表示する。

@@ -246,7 +246,7 @@ func (c *Channel) setMode(n int, ct l3.CallType, rank int, src string) {
 	}
 	cs.mode, cs.modeRank, cs.modeSrc = ct, rank, src
 	if cs.on {
-		c.note(n, fmt.Sprintf("mode %s（%s）%s", ct.Name, src, ct.Downlink))
+		c.callEvent(n, "mode", fmt.Sprintf("%s（%s）%s", ct.Name, src, ct.Downlink))
 		c.logf(n, "call", "info", "ST#%d 通信種別 %s（%s）", n, ct.Name, src)
 	}
 	c.mu.Lock()

@@ -60,6 +60,7 @@ type Channel struct {
 	constell   ConstellationInfo
 	scramble   ScrambleInfo
 	current    *BroadcastInfo
+	bcSig      sigAcc
 	level      *float64
 	pendSFs    [][]amrwbp.Frame
 	pcm        []int16
@@ -93,17 +94,20 @@ func (c *Channel) newDecoder(scramble int) {
 		OnBlock: func(b dec.BlockStats) {
 			lv := b.LevelDB
 			c.mu.Lock()
-			s := SignalInfo{TSec: b.TSec, CFOHz: b.CFOHz, CFOProm: b.CFOProm,
+			s := SignalInfo{TSec: c.sink.WallSec(b.TSec), CFOHz: b.CFOHz, CFOProm: b.CFOProm,
 				TimingTau: b.TimingTau, EVM: b.EVM, LevelDB: b.LevelDB, CorrPeak: c.signal.CorrPeak}
 			c.signal = s
 			if !math.IsInf(lv, 0) && !math.IsNaN(lv) {
 				c.level = &lv
 			}
+			if c.current != nil {
+				c.bcSig.add(b)
+			}
 			c.mu.Unlock()
 			c.emit(EvSignal, s)
 		},
 		OnConstellation: func(k dec.Constellation) {
-			ci := ConstellationInfo{TSec: k.TSec, Points: k.Points}
+			ci := ConstellationInfo{TSec: c.sink.WallSec(k.TSec), Points: k.Points}
 			c.mu.Lock()
 			c.constell = ci
 			c.mu.Unlock()
@@ -137,15 +141,13 @@ func (c *Channel) Resync() {
 	}
 	c.mu.Unlock()
 	c.startPos = c.d.ProcessedSamples()
+	if p, ok := c.sink.(rx.Positioner); ok {
+		c.startPos = max(c.startPos, int64(math.Round(p.InputSec()*c.cfg.FsIn)))
+	}
 	c.newDecoder(pinned)
 	if n == 1 || n%100 == 0 {
 		c.logf(c.procSec(), "warn", "system", "復号が追いつかず入力を捨てたので仕切り直した（累計 %d 回）", n)
 	}
-}
-
-func (c *Channel) Retune() {
-	c.startPos = c.d.ProcessedSamples()
-	c.newDecoder(c.pinnedValue())
 }
 
 func (c *Channel) pinnedValue() int {
@@ -175,7 +177,7 @@ func (c *Channel) Lock() (bool, float64, string) {
 
 func (c *Channel) Counters() rx.Counters {
 	return rx.Counters{Frames: int(c.nFrames.Load()), Good: int(c.nGood.Load()),
-		ProcSec: c.nowSec() - c.cfg.StartSec}
+		ProcSec: float64(c.absN.Load())/c.cfg.FsIn - c.cfg.StartSec}
 }
 
 func (c *Channel) Summary() string {
@@ -207,7 +209,7 @@ func (c *Channel) Close(dropped bool) {
 		c.emitQuality(now)
 		el := time.Since(c.started).Seconds()
 		c.logf(now, "info", "system", "入力終端。%.1f 秒を %.1f 秒で処理（%.1f×）",
-			now-c.cfg.StartSec, el, (now-c.cfg.StartSec)/math.Max(el, 1e-9))
+			c.inSec()-c.cfg.StartSec, el, (c.inSec()-c.cfg.StartSec)/math.Max(el, 1e-9))
 	} else {
 		c.flushAudio(true)
 		c.mu.Lock()
@@ -253,7 +255,7 @@ func (c *Channel) applyPin(v int) {
 func (c *Channel) onScramble(si dec.ScrambleInfo) {
 	info := ScrambleInfo{
 		Init: si.Init, Locked: true, Prominence: si.Prominence,
-		Confidence: si.Confidence, Frames: si.Frames, TSec: si.TimeSec, Source: si.Source,
+		Confidence: si.Confidence, Frames: si.Frames, TSec: c.sink.WallSec(si.TimeSec), Source: si.Source,
 	}
 	info.SetMunicipality()
 	c.mu.Lock()
@@ -266,9 +268,10 @@ func (c *Channel) onScramble(si dec.ScrambleInfo) {
 	c.publishStation(true)
 }
 
-func (c *Channel) procSec() float64 { return float64(c.d.ProcessedSamples()) / c.cfg.FsIn }
+func (c *Channel) inSec() float64   { return float64(c.d.ProcessedSamples()) / c.cfg.FsIn }
+func (c *Channel) procSec() float64 { return c.sink.WallSec(c.inSec()) }
 
-func (c *Channel) nowSec() float64 { return float64(c.absN.Load()) / c.cfg.FsIn }
+func (c *Channel) nowSec() float64 { return c.sink.WallSec(float64(c.absN.Load()) / c.cfg.FsIn) }
 
 func (c *Channel) wall(tsec float64) time.Time {
 	return c.std.cfg.Origin.Add(time.Duration(tsec * float64(time.Second)))
@@ -336,6 +339,7 @@ func (c *Channel) publishStation(force bool) {
 
 func (c *Channel) handleFrames(frames []dec.Frame, nowSec float64) {
 	for _, f := range frames {
+		f.TimeSec = c.sink.WallSec(f.TimeSec)
 		c.onFrame(f)
 	}
 	c.mu.Lock()
@@ -503,6 +507,7 @@ func (c *Channel) openBroadcast(tsec float64, n *NotifyInfo, midJoin bool) {
 		bc.Emergency = n.Emergency
 	}
 	c.current = bc
+	c.bcSig = sigAcc{}
 	c.voiceRun = 0
 	c.pcm = nil
 	lag := c.d.LagSeconds()
@@ -521,6 +526,32 @@ func (c *Channel) openBroadcast(tsec float64, n *NotifyInfo, midJoin bool) {
 	c.publishStation(true)
 }
 
+type sigAcc struct {
+	n, nLevel       int
+	level, evm, cfo float64
+}
+
+func (a *sigAcc) add(b dec.BlockStats) {
+	a.n++
+	a.evm += b.EVM
+	a.cfo += b.CFOHz
+	if !math.IsInf(b.LevelDB, 0) && !math.IsNaN(b.LevelDB) {
+		a.nLevel++
+		a.level += b.LevelDB
+	}
+}
+
+func (a sigAcc) line() string {
+	if a.n == 0 {
+		return ""
+	}
+	lv := "-"
+	if a.nLevel > 0 {
+		lv = fmt.Sprintf("%.1f dBFS", a.level/float64(a.nLevel))
+	}
+	return fmt.Sprintf("レベル %s・EVM %.3f・搬送波ずれ %.0f Hz（%d ブロックの平均）", lv, a.evm/float64(a.n), a.cfo/float64(a.n), a.n)
+}
+
 func (c *Channel) closeBroadcast(tsec float64, reason string) {
 	c.flushAudio(true)
 	c.mu.Lock()
@@ -535,7 +566,7 @@ func (c *Channel) closeBroadcast(tsec float64, reason string) {
 	c.pcm = nil
 	c.current = nil
 	c.voiceRun = 0
-	q, scr := c.quality, c.scramble
+	q, scr, sig := c.quality, c.scramble, c.bcSig.line()
 	var mfr, raw string
 	for i := len(c.controls) - 1; i >= 0; i-- {
 		if c.controls[i].Notify != nil {
@@ -579,6 +610,7 @@ func (c *Channel) closeBroadcast(tsec float64, reason string) {
 			{"tch_crc", fmt.Sprintf("%d/%d", q.TCHOK, q.TCHTotal)},
 			{"voice_filled", fmt.Sprintf("%d 枚（%.2f 秒）", q.VoiceFilled, float64(q.VoiceFilled)*0.08)},
 			{"voice_dropped", fmt.Sprintf("%d", q.VoiceDrop)},
+			{"signal", sig},
 		}
 		if cur.AudioURL != "" {
 			extra = append(extra, [2]string{"audio_path", rec.Path(cur.Base, rec.Audio)})
@@ -671,12 +703,12 @@ func (c *Channel) flushAudio(force bool) {
 	}
 }
 
-func (c *Channel) emitQuality(nowSec float64) {
+func (c *Channel) emitQuality(float64) {
 	c.mu.Lock()
 	el := time.Since(c.started).Seconds()
 	c.quality.ElapsedSec = el
 	if el > 0 {
-		c.quality.Throughput = (nowSec - c.cfg.StartSec) / el
+		c.quality.Throughput = (c.inSec() - c.cfg.StartSec) / el
 	}
 	q := c.quality
 	c.mu.Unlock()

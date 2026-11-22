@@ -39,7 +39,7 @@ type station struct {
 	ringInit bool
 	peak     float32
 	recs     map[int]*openRec
-	fed      int64
+	at, end int64
 }
 
 type openRec struct {
@@ -64,18 +64,14 @@ func (s *station) run() {
 	fc, _ := s.ch.(FrontChannel)
 	for c := range s.in {
 		iq := c.IQ
-		if iq == nil {
-			s.ch.Retune()
-			continue
-		}
 		if s.replayLeft.Load() > 0 {
 			s.replayLeft.Add(-1)
 		}
+		s.at, s.end = c.Pos, c.Pos+int64(len(iq))
 		if n := s.dropped.Load(); n != lastDropped {
 			lastDropped = n
 			s.ch.Resync()
 		}
-		s.fed += int64(len(iq))
 		if fc != nil && c.Prep != nil {
 			fc.FeedFront(iq, c.Prep)
 			continue
@@ -109,9 +105,11 @@ func (s *station) Emit(ev any) {
 	}
 }
 
-func (s *station) StreamTime() time.Time {
-	return s.e.origin.Add(time.Duration(float64(s.fed) / s.e.rate * float64(time.Second)))
-}
+func (s *station) StreamTime() time.Time { return s.e.clk().At(float64(s.end) / s.e.rate) }
+
+func (s *station) WallSec(sec float64) float64 { return s.e.clk().Sec(sec) }
+
+func (s *station) InputSec() float64 { return float64(s.at) / s.e.rate }
 
 func (s *station) Audio(id int, pcm []int16, rate int) {
 	if s.e.cfg.OnAudio != nil {

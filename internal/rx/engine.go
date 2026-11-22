@@ -63,8 +63,9 @@ type Engine struct {
 	band   *bandState
 	rate   float64
 	origin time.Time
-	det    Detector
-	head   *HeadRing
+	clock *Clock
+	det   Detector
+	head  *HeadRing
 	front      Front
 	frontOwned bool
 	blocked *blocklist
@@ -82,6 +83,9 @@ type Engine struct {
 	controllable, srcKnown bool
 	tuning     iqsrc.Tuning
 	haveTuning bool
+	vfoPending bool
+	vfoWant    float64
+	vfoSince   float64
 
 	mu      sync.Mutex
 	ids     map[int64]int
@@ -313,6 +317,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	if e.origin.IsZero() {
 		e.origin = time.Now()
 	}
+	e.clock = NewClock(e.origin, src.Lossy(), e.cfg.JitterSec)
 	if o.OnStart != nil {
 		o.OnStart(src.Describe(), rate)
 	}
@@ -437,7 +442,9 @@ func (e *Engine) Run(ctx context.Context) error {
 					ss = e.scanStep(ss, e.elapsed)
 				}
 			}
-			c := Chunk{IQ: iq}
+			e.observe(len(iq), time.Now())
+			ss = e.settleVFO(ss)
+			c := Chunk{IQ: iq, Pos: e.read}
 			if e.front != nil {
 				c.Prep = e.front.Prepare(iq)
 			}
@@ -498,6 +505,19 @@ func (e *Engine) applyCmds(ss []*station) []*station {
 		ss = c(ss)
 	}
 	return ss
+}
+
+func (e *Engine) observe(n int, at time.Time) {
+	if e.rate > 0 {
+		e.clk().Observe(float64(e.read)/e.rate, float64(e.read+int64(n))/e.rate, at)
+	}
+}
+
+func (e *Engine) clk() *Clock {
+	if e.clock == nil {
+		return NewClock(e.origin, false, 0)
+	}
+	return e.clock
 }
 
 func (e *Engine) distribute(ss []*station, c Chunk, lossy bool) {

@@ -141,9 +141,9 @@ func (p *Channel) send(ev Event) { p.sink.Emit(ev) }
 
 func nowMS() int64 { return time.Now().UnixMilli() }
 
-func (p *Channel) nowT() float64 { return p.t0 + float64(p.inCount)/p.fsIn }
+func (p *Channel) nowT() float64 { return p.sink.WallSec(p.t0 + float64(p.inCount)/p.fsIn) }
 
-func (p *Channel) bbT(pos int) float64 { return p.t0 + float64(pos)/p.decoder.FSBB() }
+func (p *Channel) bbT(pos int) float64 { return p.sink.WallSec(p.t0 + float64(pos)/p.decoder.FSBB()) }
 
 
 func (p *Channel) SetSquelch(enabled bool) bool {
@@ -232,8 +232,6 @@ func (p *Channel) State() rx.State {
 }
 
 func (p *Channel) Snapshot(ext map[string]any) { ext["t86"] = p.state.snapshot() }
-
-func (p *Channel) Retune() { p.cfoResetReq.Store(true) }
 
 func (p *Channel) Resync() {
 	p.state.mu.Lock()
@@ -656,6 +654,7 @@ func (p *Channel) emitQuality(t float64) {
 	} else {
 		p.state.crcOKRate = nil
 	}
+	p.iqrec.addSignal(p.state.levelDBFS, p.state.evmMedian, p.state.cfoHz)
 	q := qualityEvent{
 		Type: "quality", T: round(t, 1),
 		CFOHz: optFloat(p.state.cfoHz, 1), EVMMedian: optFloat(p.state.evmMedian, 1),

@@ -167,8 +167,8 @@ func (c *Channel) pairDuplex(n int, t float64) {
 		}
 		cs.dupWith, o.dupWith = m, n
 		text := fmt.Sprintf("複信の対: CH%d（話者 %d）⇄ CH%d（話者 %d）", n+1, cs.talker&0x7FFFF, m+1, o.talker&0x7FFFF)
-		c.note(n, "duplex_pair "+text)
-		c.note(m, "duplex_pair "+text)
+		c.callEvent(n, "duplex_pair", text)
+		c.callEvent(m, "duplex_pair", text)
 		c.emitCall(CallRec{TSec: t, Slot: n, Channel: "PICH", Kind: "直接通信 複信", Text: text, ToSlot: m, Ref: -1, ID: cs.talker})
 		c.logf(n, "call", "info", "%s", text)
 		return

@@ -133,7 +133,7 @@ func (c *Channel) codecHint(name, why string) {
 		}
 		c.endTracker(m)
 		cs.tr = c.newTracker(m)
-		c.note(m, "voice_note 符号器が決まった: "+cd.Name+"（"+why+"）")
+		c.callEvent(m, "voice_note", "符号器が決まった: "+cd.Name+"（"+why+"）")
 		for _, h := range cs.hist {
 			c.pushTracker(m, h)
 		}
@@ -441,7 +441,7 @@ func (c *Channel) setCallInfoFrom(n int, call *l3.Call, ctl float64, src string)
 	}
 	if cs.lastCC != call.Text {
 		cs.lastCC = call.Text
-		c.note(n, fmt.Sprintf("cc %s（%s）", call.Text, src))
+		c.callEvent(n, "cc", fmt.Sprintf("%s（%s）", call.Text, src))
 	}
 	c.mu.Lock()
 	if cs.peer != "" {
