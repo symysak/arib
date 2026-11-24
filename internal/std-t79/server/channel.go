@@ -839,7 +839,7 @@ func (c *Channel) station() Station {
 	defer c.mu.Unlock()
 	kind, cc := c.kindLocked()
 	s := Station{Idx: c.cfg.ID, MHz: c.cfg.MHz, OffsetHz: c.cfg.OffHz, Watched: !c.closed,
-		Synced: !c.closed && c.car.Locked, Recording: c.recOn > 0, LastTSec: c.nowT,
+		Synced: !c.closed && c.car.Locked, Recording: c.recOn > 0, LastTSec: c.nowT, PosTSec: c.nowT,
 		Ext: map[string]any{"talking": c.recOn > 0}}
 	s.Kind, s.CC, s.Org, s.Calls, s.Codec = kind, cc, c.org, c.car.Calls, c.car.Codec
 	s.Audio = c.mix.state()

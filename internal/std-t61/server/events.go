@@ -64,6 +64,8 @@ type Station struct {
 	SWName   string  `json:"sw_name"`
 	SFPos    int     `json:"sf_pos"`
 	LastTSec float64 `json:"last_t_sec"`
+	PosTSec float64 `json:"pos_t_sec,omitempty"`
+	InTSec float64 `json:"in_t_sec,omitempty"`
 
 	RICHOK   bool     `json:"rich_ok"`
 	RICHBits string   `json:"rich_bits"`

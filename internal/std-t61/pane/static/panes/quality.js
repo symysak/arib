@@ -1,9 +1,10 @@
 import { TOPIC } from '../store.js';
-import { fit, clear, lineT, grid, label, COLOR } from '../draw.js';
+import { fit, clear, lineT, lostSpans, cutSpans, shadeT, grid, label, COLOR } from '../draw.js';
 import { UI_TICK_MS } from '../ui.js';
 import { hms } from '../time.js';
 
 const SPAN_SEC = 300;
+const FRAMES_PER_SEC = 25;
 
 const LANES = [
   { key: 'richPct', name: 'RICH 一致率 [%]', min: 0, max: 100, color: () => COLOR.ok() },
@@ -25,7 +26,8 @@ export function init(store) {
     const pts = st ? (store.state.trend.get(st.idx) || []) : [];
     const now = store.state.lastT || 0;
     const t0 = now - SPAN_SEC;
-    sub.textContent = st ? `${st.mhz.toFixed(4)} MHz · 直近 ${SPAN_SEC / 60} 分` : '-';
+    sub.textContent = st ? `${st.mhz.toFixed(4)} MHz · 直近 ${SPAN_SEC / 60} 分 · 赤い網 = 同期が切れていた間` : '-';
+    const lost = lostSpans(pts, now, FRAMES_PER_SEC);
     const laneH = h / LANES.length;
     LANES.forEach((ln, i) => {
       const box = { x: 56, y: i * laneH + 12, w: w - 66, h: laneH - 22 };
@@ -33,10 +35,13 @@ export function init(store) {
       label(g, ln.name, 4, box.y + 8);
       label(g, String(ln.max), 4, box.y + 18, COLOR.grid());
       label(g, String(ln.min), 4, box.y + box.h, COLOR.grid());
-      const vals = pts.map((p) => ({ t: p.t, v: p[ln.key] ?? 0 }));
+      const level = ln.key === 'level';
+      const raw = pts.map((p) => ({ t: p.t, v: (p.synced || level) ? (p[ln.key] ?? null) : null }));
+      const vals = level ? raw : cutSpans(raw, lost);
+      shadeT(g, box, lost, t0, now, COLOR.crit());
       lineT(g, box, vals, t0, now, ln.min, ln.max, ln.color());
       const last = vals[vals.length - 1];
-      if (last) label(g, last.v.toFixed(1), box.x + box.w - 28, box.y + 8, COLOR.ink());
+      if (last && last.v !== null) label(g, last.v.toFixed(1), box.x + box.w - 28, box.y + 8, COLOR.ink());
     });
     g.font = '10px system-ui, sans-serif';
     for (let t = Math.ceil(t0 / 60) * 60; t <= now; t += 60) {

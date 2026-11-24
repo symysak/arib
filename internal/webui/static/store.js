@@ -78,13 +78,14 @@ function createStore() {
     let a = state.trend.get(st.idx);
     if (!a) { a = []; state.trend.set(st.idx, a); }
     const p = {
-      t: st.last_t_sec, level: st.level_db,
+      t: st.pos_t_sec || st.last_t_sec, inT: st.in_t_sec, level: st.level_db,
       talking: !!st.talking, recording: !!st.recording,
       ext: st.ext || {},
     };
     for (const s of specs) if (s.trend) Object.assign(p, s.trend(st));
     a.push(p);
     trim(a, LIMIT.trend);
+    return p;
   }
 
   function byFreq(a, b) { return a.mhz - b.mhz || a.idx - b.idx; }
@@ -94,8 +95,7 @@ function createStore() {
     if (i < 0) state.stations.push(st);
     else state.stations[i] = st;
     state.stations.sort(byFreq);
-    pushTrend(st);
-    state.lastT = Math.max(state.lastT, st.last_t_sec || 0);
+    state.lastT = Math.max(state.lastT, pushTrend(st).t || 0);
   }
 
   function apply(ev) {
@@ -115,7 +115,7 @@ function createStore() {
         for (const [k, v] of Object.entries(s.ext || {})) state.ext[k] = v || [];
         state.logs = s.logs || [];
         state.recs = s.recs || [];
-        for (const st of state.stations) pushTrend(st);
+        for (const st of state.stations) state.lastT = Math.max(state.lastT, pushTrend(st).t || 0);
         touch(TOPIC.meta); touch(TOPIC.stations); touch(TOPIC.activity);
         for (const sp of specs) for (const t of sp.snapshotTopics || []) touch(t);
         touch(TOPIC.logs);

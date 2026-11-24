@@ -449,7 +449,11 @@ func (p *Pipeline) newChannel(mhz float64) *watch.ChannelHook {
 				onFrame(mhz, f)
 			}
 		},
-		Level: func(db float64) { p.mu.Lock(); s.st.LevelDB, s.dirty = db, true; p.mu.Unlock() },
+		Level: func(db, inSec float64) {
+			p.mu.Lock()
+			s.st.LevelDB, s.st.InTSec, s.st.PosTSec, s.dirty = db, inSec, p.now(), true
+			p.mu.Unlock()
+		},
 		Stats: func(ds dec.Stats, coarse, cfo float64, locked bool) {
 			p.mu.Lock()
 			st := &s.st

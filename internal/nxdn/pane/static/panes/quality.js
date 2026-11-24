@@ -1,5 +1,5 @@
 import { TOPIC } from '../store.js';
-import { fit, clear, lineT, grid, label, COLOR } from '../draw.js';
+import { fit, clear, lineT, lostSpans, shadeT, grid, label, COLOR } from '../draw.js';
 import { UI_TICK_MS } from '../ui.js';
 import { hms } from '../time.js';
 
@@ -19,7 +19,7 @@ function rates(pts) {
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i];
     const df = b.frames - a.frames;
-    if (df <= 0) continue;
+    if (df <= 0) { out.push({ t: b.t, gap: true }); continue; }
     const dc = b.crcAll - a.crcAll;
     const dv = (b.voice || 0) - (a.voice || 0);
     out.push({ t: b.t, richPct: (100 * (b.richOK - a.richOK)) / df, crcPct: dc > 0 ? (100 * (b.crcOK - a.crcOK)) / dc : null,
@@ -44,7 +44,8 @@ export function init(store) {
     const rs = rates(pts);
     const now = store.state.lastT || 0;
     const t0 = now - SPAN_SEC;
-    sub.textContent = st ? `${st.mhz.toFixed(4)} MHz · 直近 ${SPAN_SEC / 60} 分` : '-';
+    sub.textContent = st ? `${st.mhz.toFixed(4)} MHz · 直近 ${SPAN_SEC / 60} 分 · 赤い網 = 同期していない間` : '-';
+    const lost = lostSpans(pts, now);
     const laneH = (h - 12) / LANES.length;
     LANES.forEach((ln, i) => {
       const box = { x: 56, y: i * laneH + 12, w: w - 66, h: laneH - 22 };
@@ -52,9 +53,13 @@ export function init(store) {
       label(g, ln.name, 4, box.y + 8);
       label(g, String(ln.max), 4, box.y + 18, COLOR.grid());
       label(g, String(ln.min), 4, box.y + box.h, COLOR.grid());
-      const vals = rs.filter((p) => p[ln.key] !== null && p[ln.key] !== undefined).map((p) => ({ t: p.t, v: p[ln.key] }));
+      const vals = ln.key === 'level'
+        ? pts.map((p) => ({ t: p.t, v: p.level ?? null }))
+        : rs.filter((p) => p.gap || (p[ln.key] !== null && p[ln.key] !== undefined))
+          .map((p) => ({ t: p.t, v: p.gap ? null : p[ln.key] }));
+      shadeT(g, box, lost, t0, now, COLOR.crit());
       lineT(g, box, vals, t0, now, ln.min, ln.max, ln.color());
-      const last = vals[vals.length - 1];
+      const last = vals.filter((p) => p.v !== null).pop();
       if (last) label(g, last.v.toFixed(1), box.x + box.w - 36, box.y + 8, COLOR.ink());
     });
     g.font = '10px system-ui, sans-serif';

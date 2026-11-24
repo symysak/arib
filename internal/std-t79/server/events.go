@@ -141,6 +141,7 @@ type Station struct {
 	LastTSec  float64        `json:"last_t_sec"`
 	Note      string         `json:"note,omitempty"`
 	Ext       map[string]any `json:"ext"`
+	PosTSec float64 `json:"pos_t_sec,omitempty"`
 
 	Dir      string    `json:"dir"`
 	PairMHz  float64   `json:"pair_mhz"`

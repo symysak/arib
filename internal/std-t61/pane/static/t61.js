@@ -68,6 +68,7 @@ store.extend({
     richPct: st.frames ? (100 * st.rich_ok_num) / st.frames : 0,
     phase: st.phase_err_deg, cfo: st.cfo_hz, mode: st.mode || '',
     synced: !!st.synced, richOK: !!st.rich_ok, ledger: !!st.ledger,
+    frames: st.frames || 0,
   }),
   select(_idx, { state }) { state.constellations.length = 0; },
   selected(idx) {

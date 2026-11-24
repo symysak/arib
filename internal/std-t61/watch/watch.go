@@ -78,7 +78,7 @@ type ChannelHook struct {
 	Frame func(f dec.Frame)
 	RecordStart func(base string, reason string)
 	RecordStop func()
-	Level func(dbfs float64)
+	Level func(dbfs, inSec float64)
 	Stats func(st dec.Stats, coarseHz, cfoHz float64, locked bool)
 	Const func(cs []dec.ConstSample)
 	Reset func(quietSec float64)
@@ -242,6 +242,7 @@ type watcher struct {
 	sink rx.Sink
 
 	peak float32
+	fed  int64
 
 	richOK atomicInt
 	frames atomicInt
@@ -325,8 +326,13 @@ func (w *watcher) feedBase(y []complex64) {
 		sum += float64(a) * float64(a)
 	}
 	rms := math.Sqrt(sum / float64(len(y)))
+	w.fed += int64(len(y))
 	if w.hook != nil && w.hook.Level != nil {
-		w.hook.Level(20 * math.Log10(math.Max(rms, 1e-9)/math.Max(float64(w.peak), 1e-9)))
+		in := float64(w.fed-int64(len(y))) / w.rate
+		if p, ok := w.sink.(rx.Positioner); ok {
+			in = w.sink.WallSec(p.InputSec())
+		}
+		w.hook.Level(20*math.Log10(math.Max(rms, 1e-9)/math.Max(float64(w.peak), 1e-9)), in)
 	}
 	w.sink.IQ(y, w.rate)
 	w.applyUplinkScramble()
