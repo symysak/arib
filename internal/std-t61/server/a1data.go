@@ -32,6 +32,10 @@ type a1Data struct {
 	ok292   bool
 	k264    *scpca1u264.Keyer
 	rd264   *data.Station
+	rd212   *data.Station
+	use212  bool
+	wc212   int
+	known   int
 	tsv     *os.File
 	day     string
 	raw     *os.File
@@ -41,7 +45,7 @@ type a1Data struct {
 
 const URawRepeatSec = 600
 
-var uChannels = []data.Channel{scpca1u292.Channel, scpca1u264.Channel}
+var uChannels = []data.Channel{scpca1u292.Channel, scpca1u264.Channel, scpca1u264.DataChannel}
 
 func CheckDataFormat(name string) error {
 	err := data.Valid(uChannels[0], name)
@@ -80,8 +84,47 @@ func (p *Pipeline) newA1Data(mhz float64) *a1Data {
 			hint = w
 		}
 	}
-	return &a1Data{key: scpca1u292.NewKeyer(wc, hint), rd: data.NewStation(scpca1u292.Channel, dataSpec(scpca1u292.Channel, p.cfg.DataFormat)),
-		k264: scpca1u264.NewKeyer(-1, -1), rd264: data.NewStation(scpca1u264.Channel, dataSpec(scpca1u264.Channel, p.cfg.DataFormat))}
+	spec212 := dataSpec(scpca1u264.DataChannel, p.cfg.DataFormat)
+	a := &a1Data{key: scpca1u292.NewKeyer(wc, hint), rd: data.NewStation(scpca1u292.Channel, dataSpec(scpca1u292.Channel, p.cfg.DataFormat)),
+		k264: scpca1u264.NewKeyer(-1, -1), rd264: data.NewStation(scpca1u264.Channel, dataSpec(scpca1u264.Channel, p.cfg.DataFormat)),
+		rd212: data.NewStation(scpca1u264.DataChannel, spec212), use212: !strings.EqualFold(spec212, data.Off)}
+	if wc > 0 {
+		a.known = wc
+	} else if hint > 0 {
+		a.known = hint
+	}
+	return a
+}
+
+func (a *a1Data) u212Keys() []int {
+	var ks []int
+	for _, wc := range []int{a.wc212, a.known} {
+		if wc > 0 && (len(ks) == 0 || ks[0] != wc) {
+			ks = append(ks, wc)
+		}
+	}
+	return ks
+}
+
+type uTag struct {
+	no      int64
+	read212 int
+}
+
+func (p *Pipeline) readU212(s *stationState, a *a1Data, f dec.Frame, route string) int {
+	for _, wc := range a.u212Keys() {
+		d, errs, crc := scpca1u264.DecodeData(f.TCH1, wc)
+		if !crc || errs > scpca1u264.DataMaxErrs {
+			continue
+		}
+		a.wc212 = wc
+		for _, ev := range a.rd212.Read(data.Frame{Ch: scpca1u264.DataChannel, No: f.Number, TimeSec: f.TimeSec, Bits: d,
+			Route: route, Idle: f.A1RICH.IsIdleLine()}) {
+			p.onDataEvent(s, ev)
+		}
+		return wc
+	}
+	return 0
 }
 
 type uRes struct {
@@ -103,13 +146,14 @@ func (p *Pipeline) onA1U(s *stationState, f dec.Frame) uRes {
 		route = "直接"
 	}
 	var out uRes
+	u292OK := false
 	d292 := a.ok292
 	_, d264 := a.k264.WC()
 	if !d264 {
 		for _, d := range a.key.Feed(scpca1u292.Item{TCH1: f.TCH1, Soft: f.TCH1Soft, Tag: f.Number}) {
 			if d.Tag == f.Number {
 				res := d.Result
-				out.U292 = &res
+				out.U292, u292OK = &res, d.OK
 			}
 			if d.OK {
 				a.ok292 = true
@@ -124,33 +168,72 @@ func (p *Pipeline) onA1U(s *stationState, f dec.Frame) uRes {
 		}
 		d292 = a.ok292
 	}
+	read212 := 0
 	if !d292 {
-		for _, d := range a.k264.Feed(scpca1u264.Item{TCH1: f.TCH1, Tag: f.Number}) {
-			if d.Tag == f.Number {
+		if a.use212 {
+			read212 = p.readU212(s, a, f, route)
+		}
+		for _, d := range a.k264.Feed(scpca1u264.Item{TCH1: f.TCH1, Tag: uTag{no: f.Number, read212: read212}}) {
+			tag := d.Tag.(uTag)
+			if tag.no == f.Number {
 				res := d.Result
 				out.U264 = &res
 			}
 			bits := append(append([]uint8(nil), d.Body...), d.Check...)
-			p.writeURaw(s, r, d.Tag.(int64), d.TCH1, bits, d.Result)
+			wc212, dd := tag.read212, []uint8(nil)
+			if wc212 == 0 {
+				if wc, ok := scpca1u264.WCFromKey(d.WC); ok {
+					if x, _, crc := scpca1u264.DecodeData(d.TCH1, wc); crc {
+						wc212, dd = wc, x
+					}
+				}
+			}
+			via, key := scpca1u264.Name, d.WC
+			if wc212 > 0 {
+				via, key = scpca1u264.DataName, wc212
+			}
+			p.writeURaw(s, r, tag.no, d.TCH1, bits, d.Result, via, key)
+			if a.use212 && wc212 > 0 {
+				if dd != nil {
+					a.wc212 = wc212
+					for _, ev := range a.rd212.Read(data.Frame{Ch: scpca1u264.DataChannel, No: tag.no, TimeSec: f.TimeSec, Bits: dd,
+						Route: route, Idle: r.IsIdleLine()}) {
+						p.onDataEvent(s, ev)
+					}
+				}
+				continue
+			}
 			if !d.OK {
 				continue
 			}
-			for _, ev := range a.rd264.Read(data.Frame{Ch: scpca1u264.Channel, No: d.Tag.(int64), TimeSec: f.TimeSec, Bits: bits,
+			for _, ev := range a.rd264.Read(data.Frame{Ch: scpca1u264.Channel, No: tag.no, TimeSec: f.TimeSec, Bits: bits,
 				Route: route, Idle: r.IsIdleLine()}) {
 				p.onDataEvent(s, ev)
 			}
 		}
 	}
-	if out.U292 != nil || out.U264 != nil {
+	if u292OK || out.U264 != nil || read212 > 0 {
 		p.mu.Lock()
-		if out.U292 != nil {
+		switch {
+		case u292OK:
 			s.st.Ext["u_key"] = fmt.Sprintf("%s wc=%d", scpca1u292.Name, out.U292.WC)
 			if n := a.rd.Format(); n != "" {
 				s.st.Ext["data_format"] = n
 			}
-		} else {
+		case out.U264 != nil:
 			s.st.Ext["u_key"] = fmt.Sprintf("%s wc=%d", scpca1u264.Name, out.U264.WC)
+			if a.wc212 > 0 {
+				s.st.Ext["u_key"] = fmt.Sprintf("%s wc=%d（%s wc=%d = 音声・制御語と同じ値）", scpca1u264.Name, out.U264.WC, scpca1u264.DataName, a.wc212)
+			}
 			if n := a.rd264.Format(); n != "" {
+				s.st.Ext["data_format"] = n
+			}
+			if n := a.rd212.Format(); n != "" && a.wc212 > 0 {
+				s.st.Ext["data_format"] = n
+			}
+		default:
+			s.st.Ext["u_key"] = fmt.Sprintf("%s wc=%d（音声・制御語と同じ値）", scpca1u264.DataName, a.wc212)
+			if n := a.rd212.Format(); n != "" {
 				s.st.Ext["data_format"] = n
 			}
 		}
@@ -162,7 +245,12 @@ func (p *Pipeline) onA1U(s *stationState, f dec.Frame) uRes {
 
 func (p *Pipeline) onDataEvent(s *stationState, ev data.Event) {
 	de := &DataEvent{Idx: s.st.Idx, MHz: s.st.MHz, Event: ev}
+	key := dataL3Key(s.st.Idx, ev)
 	de.TimeSec = p.now()
+	if ev.Again {
+		p.againL3(key, de)
+		return
+	}
 	kind := string(ev.Kind)
 	p.mu.Lock()
 	if p.dataEvs == nil {
@@ -180,6 +268,47 @@ func (p *Pipeline) onDataEvent(s *stationState, ev data.Event) {
 	}
 	p.addLogFor(s.st.Idx, "data", "%.4f MHz %s", s.st.MHz, ev.Label)
 	p.writeDataTSV(s, de)
+	r := dataL3(de)
+	p.storeL3(r)
+	p.mu.Lock()
+	if p.dataL3 == nil || len(p.dataL3) > 2*maxL3 {
+		p.dataL3 = map[string]*L3Rec{}
+	}
+	p.dataL3[key] = r
+	p.mu.Unlock()
+}
+
+func dataL3Key(idx int, ev data.Event) string { return fmt.Sprintf("%d\x00%s", idx, ev.Key()) }
+
+func (p *Pipeline) againL3(key string, de *DataEvent) {
+	p.mu.Lock()
+	r := p.dataL3[key]
+	if r == nil {
+		p.mu.Unlock()
+		return
+	}
+	if r.Repeat < 1 {
+		r.Repeat = 1
+	}
+	r.Repeat += de.N()
+	r.TSec = de.TimeSec
+	cp := *r
+	p.mu.Unlock()
+	p.emit(Event{Type: "l3", L3: &cp})
+}
+
+func dataL3(de *DataEvent) *L3Rec {
+	tree := []Node{{Label: "書式", Value: de.Format}, {Label: "種類", Value: string(de.Kind)}}
+	if de.From != "" {
+		tree = append(tree, Node{Label: "送り元", Value: de.From})
+	}
+	if de.Pos != nil {
+		tree = append(tree, Node{Label: "位置", Value: fmt.Sprintf("%.6f, %.6f", de.Pos.Lat, de.Pos.Lon)})
+	}
+	for _, r := range de.Rows {
+		tree = append(tree, Node{Label: r.Name, Value: r.Text, Bits: r.Bits})
+	}
+	return &L3Rec{Idx: de.Idx, TSec: de.TimeSec, MHz: de.MHz, Entity: "データ", Name: de.Label, Tree: tree, RawHex: hexOf(de.Raw), Repeat: de.N()}
 }
 
 func (p *Pipeline) writeDataTSV(s *stationState, de *DataEvent) {
@@ -215,7 +344,7 @@ func (p *Pipeline) writeDataTSV(s *stationState, de *DataEvent) {
 		strings.ReplaceAll(de.Label, "\t", " "), lat, lon, strings.ToUpper(hex.EncodeToString(de.Raw)))
 }
 
-func (p *Pipeline) writeURaw(s *stationState, r *l1.A1RICH, no int64, tch1, bits []uint8, res scpca1u264.Result) {
+func (p *Pipeline) writeURaw(s *stationState, r *l1.A1RICH, no int64, tch1, bits []uint8, res scpca1u264.Result, via string, key int) {
 	if p.cfg.Watch.LogDir == "" || s.a1 == nil {
 		return
 	}
@@ -261,7 +390,7 @@ func (p *Pipeline) writeURaw(s *stationState, r *l1.A1RICH, no int64, tch1, bits
 	case res.OK:
 		form = "短い形"
 	}
-	fmt.Fprintf(a.raw, "%s\t%d\t%d\t%d\t%s\t%d\t%s\t%s\t%s\n", now.Format("15:04:05.000"), no, r.CFN, r.FN, scpca1u264.Name, res.WC, form,
+	fmt.Fprintf(a.raw, "%s\t%d\t%d\t%d\t%s\t%d\t%s\t%s\t%s\n", now.Format("15:04:05.000"), no, r.CFN, r.FN, via, key, form,
 		h, strings.ToUpper(hex.EncodeToString(bitpack.ToBytes(tch1))))
 }
 

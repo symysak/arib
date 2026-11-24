@@ -438,12 +438,14 @@ func (w *Wide) Run(ctx context.Context) error {
 
 	var stopping atomic.Bool
 	stopCh := make(chan struct{})
+	var stopOnce sync.Once
+	closeStop := func() { stopOnce.Do(func() { close(stopCh) }) }
 	go func() {
 		select {
 		case <-ctx.Done():
 			lg.Printf("停止の合図を受けた。録音を閉じてから終わる")
 			stopping.Store(true)
-			close(stopCh)
+			closeStop()
 		case <-stopCh:
 		}
 	}()
@@ -519,9 +521,7 @@ func (w *Wide) Run(ctx context.Context) error {
 			lastReport = time.Now()
 		}
 	}
-	if !stopping.Load() {
-		close(stopCh)
-	}
+	closeStop()
 	rwg.Wait()
 	lg.Printf("監視終了")
 	return nil

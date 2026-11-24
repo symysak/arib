@@ -69,6 +69,7 @@ type L3Rec struct {
 	RawHex string  `json:"raw_hex"`
 	L2No   int64   `json:"l2_no"`
 	Err    string  `json:"err,omitempty"`
+	Repeat int `json:"repeat,omitempty"`
 }
 
 func rangeOf(a, b int) string { return fmt.Sprintf("bit %d-%d", a, b) }

@@ -91,6 +91,7 @@ func (r *voiceRun) upFrame(f dec.Frame, vf voice.Frame, isVoice bool) bool {
 func redescramble(vf voice.Frame, from, to int) voice.Frame {
 	a, b := l1.ServiceTCHMask(from), l1.ServiceTCHMask(to)
 	out := vf
+	out.Init = to
 	out.Bits = append([]uint8(nil), vf.Bits...)
 	if vf.Soft != nil {
 		out.Soft = append([]float32(nil), vf.Soft...)

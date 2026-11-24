@@ -44,8 +44,9 @@ export function init(store) {
     const all = store.state.ext.message || [];
     if (!all.length) return;
     pane.style.display = '';
-    setText(sub, `${all.length} 件`);
-    syncList(list, all.slice(-300).reverse(), keyOf, makeRow, (node, p) => {
+    const shown = all.filter((p) => store.inScope(p.idx));
+    setText(sub, shown.length === all.length ? `${all.length} 件` : `${shown.length} 件（全部で ${all.length} 件）`);
+    syncList(list, shown.slice(-300).reverse(), keyOf, makeRow, (node, p) => {
       node._p = p;
       node._key = keyOf(p);
       setText(node._parts.t, hms(p.t_sec));

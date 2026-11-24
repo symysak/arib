@@ -17,6 +17,7 @@ type Frame struct {
 	Bits    []uint8
 	Soft    []float32
 	Sub int
+	Init int
 }
 
 type Check struct {

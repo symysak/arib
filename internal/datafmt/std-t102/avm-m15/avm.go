@@ -90,6 +90,7 @@ type burst struct {
 	extra    [][]byte
 	ended    bool
 	pkt *l3.B54Event
+	n int
 }
 
 type reader struct {
@@ -113,6 +114,7 @@ func (r *reader) Read(f data.Frame) []data.Event {
 	}
 	c := r.cur
 	c.last = f.TimeSec
+	c.n++
 	m := l3.Parse(f.Route, b)
 	for _, e := range r.b54.Push(m) {
 		if e.Kind == "message" {
@@ -162,10 +164,10 @@ func (r *reader) flush() []data.Event {
 	}
 	if c.report == nil {
 		return []data.Event{{Kind: data.KindMessage, No: c.no, TimeSec: c.t0, Format: Name, From: from,
-			Label: fmt.Sprintf("車 %s の送信（位置の通報なし）", from), Rows: rows}}
+			Label: fmt.Sprintf("車 %s の送信（位置の通報なし）", from), Rows: rows, Count: c.n}}
 	}
 	b := c.report
-	ev := data.Event{Kind: data.KindPosition, No: c.no, TimeSec: c.t0, Format: Name, From: from, Raw: b}
+	ev := data.Event{Kind: data.KindPosition, No: c.no, TimeSec: c.t0, Format: Name, From: from, Raw: b, Count: c.n}
 	lat, lon, ok := position(b)
 	fix := b[10] == 0
 	sec := binary.LittleEndian.Uint16(b[5:7])
@@ -210,5 +212,9 @@ func degText(b []byte, v float64, ok bool, hemi string) string {
 		return fmt.Sprintf("読めない（0x%08X）", raw)
 	}
 	d := math.Floor(v)
-	return fmt.Sprintf("%s %.0f°%.4f′ = %.6f°（0x%08X）", hemi, d, (v-d)*60, v, raw)
+	out := fmt.Sprintf("%s %.0f°%.4f′ = %.6f°（0x%08X）", hemi, d, (v-d)*60, v, raw)
+	if raw&1 != 0 {
+		out += "（ビット 0 が立っている = 南緯 / 西経の旗とみる。未確認）"
+	}
+	return out
 }

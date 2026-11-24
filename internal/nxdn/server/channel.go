@@ -62,9 +62,11 @@ type Channel struct {
 	l1No                          int64
 	msgNo                         int64
 	lastMsg                       map[string]*MsgRec
-	tsv                           *os.File
-	tsvDay                        string
-	keyLog                        int
+	dataRows  map[string]*MsgRec
+	dataOrder []string
+	tsv       *os.File
+	tsvDay    string
+	keyLog    int
 
 	nFrames, nGood atomic.Int64
 	nCRC           atomic.Int64
@@ -131,7 +133,7 @@ type txState struct {
 }
 
 func newChannel(s *Standard, c rx.ChannelConfig, sink rx.Sink, opt ChannelOpt) *Channel {
-	ch := &Channel{std: s, cfg: c, sink: sink, opt: opt, watched: true, lastMsg: map[string]*MsgRec{}, trusted: map[int]bool{}, lastInit: -1}
+	ch := &Channel{std: s, cfg: c, sink: sink, opt: opt, watched: true, lastMsg: map[string]*MsgRec{}, dataRows: map[string]*MsgRec{}, trusted: map[int]bool{}, lastInit: -1}
 	bank, _ := c.Front.(*chanbank.Bank)
 	ch.d = decoder.New(decoder.Config{SampleRate: c.FsIn, OffsetHz: c.OffHz, StartSec: c.StartSec, Bank: bank})
 	ch.keyer = s.keyer(opt.Init)
@@ -789,7 +791,12 @@ func (c *Channel) readData(frames []data.Frame) {
 }
 
 func (c *Channel) emitData(de *DataEvent) {
+	if de.Again {
+		c.dataRow(de)
+		return
+	}
 	c.sink.Emit(Event{Type: string(de.Kind), Data: de})
+	c.dataRow(de)
 	c.logf("data", "info", "%s", de.Label)
 	c.note("data " + de.Label)
 	c.writeDataTSV(de)
@@ -825,6 +832,54 @@ func (c *Channel) writeDataTSV(de *DataEvent) {
 	}
 	fmt.Fprintf(c.tsv, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%X\n", now.Format("15:04:05.000"), de.Kind, de.Format, de.From,
 		strings.ReplaceAll(de.Label, "\t", " "), lat, lon, de.Raw)
+}
+
+const DataMsgCh = "データ"
+
+const maxDataRows = 256
+
+func (c *Channel) dataRow(de *DataEvent) {
+	key := de.Event.Key()
+	if de.Again {
+		r := c.dataRows[key]
+		if r == nil {
+			return
+		}
+		r.Repeat += de.N()
+		r.TSec = de.TimeSec
+		cp := *r
+		c.sink.Emit(Event{Type: EvMsg, Msg: &cp})
+		return
+	}
+	m := dataMsg(de)
+	c.msgNo++
+	m.No = int64(c.cfg.ID)<<40 | c.msgNo
+	if _, ok := c.dataRows[key]; !ok {
+		c.dataOrder = append(c.dataOrder, key)
+		if len(c.dataOrder) > maxDataRows {
+			delete(c.dataRows, c.dataOrder[0])
+			c.dataOrder = c.dataOrder[1:]
+		}
+	}
+	c.dataRows[key] = m
+	cp := *m
+	c.sink.Emit(Event{Type: EvMsg, Msg: &cp})
+}
+
+func dataMsg(de *DataEvent) *MsgRec {
+	tree := []Node{{Label: "書式", Value: de.Format}, {Label: "種類", Value: string(de.Kind)}}
+	if de.From != "" {
+		tree = append(tree, Node{Label: "送り元", Value: de.From})
+	}
+	if de.Pos != nil {
+		tree = append(tree, Node{Label: "位置", Value: fmt.Sprintf("%.6f, %.6f", de.Pos.Lat, de.Pos.Lon)})
+	}
+	for _, r := range de.Rows {
+		tree = append(tree, Node{Label: r.Name, Value: r.Text, Bits: r.Bits})
+	}
+	return &MsgRec{Idx: de.Idx, TSec: de.TimeSec, Repeat: de.N(), U: -1, Tree: tree,
+		Msg: Message{Ch: DataMsgCh, Name: de.Label, Summary: de.Label, Maker: -1, Raw: de.Raw},
+		Key: "data/" + de.Event.Key()}
 }
 
 func dirOf(p string) string {

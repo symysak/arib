@@ -3,9 +3,12 @@ package l1
 import (
 	"fmt"
 
+	"github.com/symysak/arib/internal/data"
 	nx "github.com/symysak/arib/internal/nxdn/l1"
 	"github.com/symysak/arib/internal/voice"
 )
+
+const DataChannel data.Channel = "T98-NV1"
 
 const VoiceChannel voice.Channel = "T98-TCH"
 

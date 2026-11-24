@@ -5,7 +5,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/symysak/arib/internal/std-t61/fec"
 	"github.com/symysak/arib/internal/std-t61/l1"
 	"github.com/symysak/arib/internal/std-t61/scpc-a1f40"
 	t61voice "github.com/symysak/arib/internal/std-t61/voice"
@@ -18,6 +20,11 @@ const Name = "ambeplus-a1"
 
 const Variant = "k7f40"
 
+const (
+	NameChan    = "ambeplus-a1c"
+	VariantChan = "k7f40c"
+)
+
 func init() {
 	voice.Register(voice.Codec{
 		Name:      Name,
@@ -27,12 +34,26 @@ func init() {
 		Ch:        t61voice.TCH1,
 		Check:     "FEC",
 		Available: ambe2c.Available,
-		New:       newFromOptions,
+		New:       func(o voice.Options) (voice.Voice, error) { return newFromOptions(o, false) },
 		Probe:     Probe,
+	})
+	voice.Register(voice.Codec{
+		Name:      NameChan,
+		Desc:      "AMBE+ 2000（第 1 編 付録 1 の TCH1 に 40 ビットのフレーム。スクランブルは TCH1 のチャネルビットに掛かる形。初期値は区画のビタビから当てる。-codec-opt wc=1..511 で固定）",
+		Vocoder:   "AMBE+ 2000",
+		Transport: "付録 1 TCH1 f40c（K=7 の 3 区画・40 ビット × 8 / クラスタ・チャネルビットに PN）",
+		Ch:        t61voice.TCH1,
+		Check:     "FEC",
+		Available: ambe2c.Available,
+		New:       func(o voice.Options) (voice.Voice, error) { return newFromOptions(o, true) },
 	})
 }
 
-func newFromOptions(o voice.Options) (voice.Voice, error) {
+func newFromOptions(o voice.Options, chanPN bool) (voice.Voice, error) {
+	name := Name
+	if chanPN {
+		name = NameChan
+	}
 	wc, hint := -1, -1
 	for k, s := range o {
 		switch k {
@@ -43,13 +64,16 @@ func newFromOptions(o voice.Options) (voice.Voice, error) {
 			}
 			wc = int(n)
 		case "hint":
-			name, w, ok := strings.Cut(s, ":")
-			if n, err := strconv.ParseInt(w, 0, 32); ok && name == Name && err == nil && n >= 0 && n < l1.A1Patterns {
+			hName, w, ok := strings.Cut(s, ":")
+			if n, err := strconv.ParseInt(w, 0, 32); ok && name == hName && err == nil && n >= 0 && n < l1.A1Patterns {
 				hint = int(n)
 			}
 		default:
-			return nil, fmt.Errorf("%s に設定 %q はありません（wc）", Name, k)
+			return nil, fmt.Errorf("%s に設定 %q はありません（wc）", name, k)
 		}
+	}
+	if chanPN {
+		return NewChan(wc, hint), nil
 	}
 	return New(wc, hint), nil
 }
@@ -58,6 +82,9 @@ const (
 	keyVotes = 2
 	maxPending = 500
 	maxFill = 50
+	chanVotes = 2
+	chanScanEvery = 5
+	maxPendFrames = 190
 	frameSec = 0.04
 )
 
@@ -67,12 +94,25 @@ type slot struct {
 	lost bool
 }
 
+type pendFrame struct {
+	soft []float32
+	secs []int
+	lost []slot
+}
+
 type Voice struct {
-	wc     int
-	hinted bool
-	fixed  bool
-	votes  map[int]int
-	pend   []slot
+	name    string
+	variant string
+	chanPN  bool
+	hintWC  int
+	cand    []int
+	sinceN  int
+	pendF   []pendFrame
+	wc      int
+	hinted  bool
+	fixed   bool
+	votes   map[int]int
+	pend    []slot
 	lastNo  int64
 	lastFN  int
 	lastT   float64
@@ -82,7 +122,7 @@ type Voice struct {
 }
 
 func New(wc, hint int) *Voice {
-	v := &Voice{wc: -1, votes: map[int]int{}, lastNo: -1, picked: -1}
+	v := &Voice{name: Name, variant: Variant, wc: -1, votes: map[int]int{}, lastNo: -1, picked: -1}
 	switch {
 	case wc >= 0:
 		v.wc, v.fixed, v.noteWhy = wc, true, "（固定）"
@@ -92,7 +132,23 @@ func New(wc, hint int) *Voice {
 	return v
 }
 
-func (v *Voice) Name() string { return "AMBE+ 2000（付録 1 TCH1）" }
+func NewChan(wc, hint int) *Voice {
+	v := &Voice{name: NameChan, variant: VariantChan, chanPN: true, hintWC: -1, wc: -1, votes: map[int]int{}, lastNo: -1, picked: -1}
+	if wc >= 0 {
+		v.wc, v.fixed, v.noteWhy = wc, true, "（固定）"
+	}
+	if hint > 0 {
+		v.hintWC = hint
+	}
+	return v
+}
+
+func (v *Voice) Name() string {
+	if v.chanPN {
+		return "AMBE+ 2000（付録 1 TCH1・チャネルに PN）"
+	}
+	return "AMBE+ 2000（付録 1 TCH1）"
+}
 
 func (v *Voice) Key() (wc int, ok bool) { return v.wc, v.wc >= 0 }
 
@@ -131,6 +187,9 @@ func (v *Voice) Transport(f voice.Frame) (voice.Unit, bool, error) {
 	secs := scpca1f40.VoiceSections(fn)
 	if secs == nil {
 		return voice.Unit{}, false, nil
+	}
+	if v.chanPN {
+		return v.transportChan(softOf(f), secs, slots)
 	}
 	split, _ := scpca1f40.Split(softOf(f))
 	chk := voice.Check{Valid: true, OK: true}
@@ -175,16 +234,18 @@ func (v *Voice) vote(wc int) {
 }
 
 func (v *Voice) unit(slots []slot, chk voice.Check) voice.Unit {
-	u := voice.Unit{Check: chk, Note: fmt.Sprintf("%s・wc=%d%s", Variant, v.wc, v.noteWhy)}
+	u := voice.Unit{Check: chk, Note: fmt.Sprintf("%s・wc=%d%s", v.variant, v.wc, v.noteWhy)}
 	if v.picked != v.wc && !v.hinted {
 		v.picked = v.wc
-		u.Choice = &voice.Choice{Codec: Name, Opts: voice.Options{"wc": strconv.Itoa(v.wc)}}
+		u.Choice = &voice.Choice{Codec: v.name, Opts: voice.Options{"wc": strconv.Itoa(v.wc)}}
 	}
 	out := make([]slot, len(slots))
 	var raw []uint8
 	for i, s := range slots {
-		if !s.lost {
+		if !s.lost && !v.chanPN {
 			s.f = scpca1f40.Descramble(s.f, s.sec, v.wc)
+		}
+		if !s.lost {
 			raw = append(raw, s.f[:]...)
 		}
 		out[i] = s
@@ -193,6 +254,133 @@ func (v *Voice) unit(slots []slot, chk voice.Check) voice.Unit {
 	u.Raw = packBits(raw)
 	return u
 }
+
+var chanMasks = sync.OnceValue(func() (m [l1.A1Patterns][]uint8) {
+	for i := range m {
+		m[i] = fec.PN95(i, l1.A1TCH1Bits)
+	}
+	return
+})
+
+func chanSplit(soft []float32, wc int) [scpca1f40.Sections]scpca1f40.Section {
+	m := chanMasks()[wc]
+	x := make([]float32, len(soft))
+	for i, s := range soft {
+		if m[i] == 1 {
+			s = -s
+		}
+		x[i] = s
+	}
+	split, _ := scpca1f40.Split(x)
+	return split
+}
+
+func chanOK(soft []float32, secs []int, wc int) bool {
+	split := chanSplit(soft, wc)
+	for _, sec := range secs {
+		if !split[sec].Voice() {
+			return false
+		}
+	}
+	return true
+}
+
+func (v *Voice) transportChan(soft []float32, secs []int, lost []slot) (voice.Unit, bool, error) {
+	if v.wc < 0 {
+		v.learnChan(soft, secs)
+		v.pendF = append(v.pendF, pendFrame{soft: append([]float32(nil), soft...), secs: secs, lost: lost})
+		if over := len(v.pendF) - maxPendFrames; over > 0 {
+			v.pendF = v.pendF[over:]
+		}
+		if v.wc < 0 {
+			return voice.Unit{}, false, nil
+		}
+		var slots []slot
+		chk := voice.Check{Valid: true, OK: true}
+		for _, p := range v.pendF {
+			slots = append(slots, p.lost...)
+			slots = append(slots, v.chanSlots(p.soft, p.secs, &chk)...)
+		}
+		v.pendF = nil
+		return v.unit(slots, chk), true, nil
+	}
+	chk := voice.Check{Valid: true, OK: true}
+	return v.unit(append(lost, v.chanSlots(soft, secs, &chk)...), chk), true, nil
+}
+
+func (v *Voice) chanSlots(soft []float32, secs []int, chk *voice.Check) []slot {
+	split := chanSplit(soft, v.wc)
+	var out []slot
+	for _, sec := range secs {
+		s := split[sec]
+		if !s.Voice() {
+			chk.OK = false
+			out = append(out, slot{sec: sec, lost: true})
+			continue
+		}
+		chk.Corrected += s.Errors
+		out = append(out, slot{sec: sec, f: s.Frame()})
+	}
+	return out
+}
+
+func (v *Voice) learnChan(soft []float32, secs []int) {
+	few := v.cand
+	if v.hintWC > 0 {
+		few = append([]int{v.hintWC}, few...)
+	}
+	hits := v.chanTry(soft, secs, few)
+	if len(hits) == 0 {
+		if len(v.cand) > 0 {
+			v.cand, v.sinceN = nil, 0
+		}
+		if v.sinceN%chanScanEvery == 0 {
+			hits = v.chanTry(soft, secs, chanKeys())
+		}
+		v.sinceN++
+	}
+	if len(hits) == 0 {
+		return
+	}
+	v.cand, v.sinceN = hits, 0
+	if v.hintWC > 0 && v.votes[v.hintWC] >= 1 {
+		v.wc, v.noteWhy = v.hintWC, "（台帳か前の通話の組）"
+		return
+	}
+	best, n := -1, 0
+	for _, wc := range hits {
+		if c := v.votes[wc]; c > n {
+			best, n = wc, c
+		}
+	}
+	if n >= chanVotes {
+		v.wc, v.noteWhy = best, "（区画のビタビから）"
+	}
+}
+
+func (v *Voice) chanTry(soft []float32, secs []int, keys []int) []int {
+	var hits []int
+	seen := map[int]bool{}
+	for _, wc := range keys {
+		if seen[wc] {
+			continue
+		}
+		seen[wc] = true
+		if chanOK(soft, secs, wc) {
+			hits = append(hits, wc)
+			v.votes[wc]++
+		}
+	}
+	return hits
+}
+
+var chanKeys = sync.OnceValue(func() []int {
+	k := make([]int, 0, l1.A1Patterns-1)
+	for wc := 1; wc < l1.A1Patterns; wc++ {
+		k = append(k, wc)
+	}
+	return k
+})
 
 func (v *Voice) Erase() (voice.Unit, bool) { return voice.Unit{}, false }
 

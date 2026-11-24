@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/symysak/arib/internal/data"
 	"github.com/symysak/arib/internal/nxdn/decoder"
 	nxl1 "github.com/symysak/arib/internal/nxdn/l1"
 	nx "github.com/symysak/arib/internal/nxdn/server"
@@ -57,6 +58,7 @@ type link struct {
 
 	radios map[string]*Radio
 	groups map[int]*Group
+	makers map[int]l3.MakerReader
 
 	tx struct {
 		start, last float64
@@ -67,12 +69,16 @@ type link struct {
 		rank  int
 		voice int
 		types []string
+		callText string
+		keyTried int
 	}
 	sb0, pichOK int
+	txNo int64
 }
 
 func newLink(h nx.Host, keys map[int]int, db *licensee.DB) *link {
-	k := &link{h: h, db: db, asm: l3.NewAsm(), cfg: keys, found: map[int]int{}, radios: map[string]*Radio{}, groups: map[int]*Group{}}
+	k := &link{h: h, db: db, asm: l3.NewAsm(), cfg: keys, found: map[int]int{}, radios: map[string]*Radio{}, groups: map[int]*Group{},
+		makers: map[int]l3.MakerReader{}}
 	if c, ok := chplan.Lookup(h.MHz()); ok {
 		k.ch = &c
 	}
@@ -92,6 +98,7 @@ func (k *link) resetTx() {
 	k.tx.uc, k.tx.call, k.tx.maker = -1, -1, -1
 	k.tx.pend = [3]int{-1, -1, -1}
 	k.tx.csm, k.tx.rank, k.tx.voice, k.tx.types = "", 0, 0, nil
+	k.tx.callText, k.tx.keyTried = "", 0
 }
 
 var txKinds = []string{"不明", "同期バーストだけ", "終話だけ", "データ（非音声）", "音声"}
@@ -111,8 +118,12 @@ func kindRank(m l1.Mode) int {
 }
 
 func (k *link) TxStart() {
+	k.txNo++
 	k.resetTx()
 	k.asm.Reset()
+	for _, r := range k.makers {
+		r.TxStart()
+	}
 	k.h.Tx(func(tx *TxRec) bool {
 		tx.Ext = map[string]any{}
 		if k.ch != nil {
@@ -246,6 +257,7 @@ func (k *link) Frame(f decoder.Frame, kd nxl1.Keyed) nx.Reading {
 						g.Maker, g.Cipher, g.LastT = maker, call == l3.CallCipher, f.TimeSec
 						k.h.Tx(func(tx *TxRec) bool {
 							tx.Maker = maker
+							tx.Ext["maker_name"] = l3.MakerName(maker)
 							tx.Ext["call"] = l3.CallName(call)
 							tx.Ext["cipher"] = call == l3.CallCipher
 							return true
@@ -265,6 +277,11 @@ func (k *link) Frame(f decoder.Frame, kd nxl1.Keyed) nx.Reading {
 				k.asm.Reset()
 			} else if m, ok := k.asm.Push(s.Head, s.Data[:]); ok {
 				msgs = append(msgs, sacchMsg(f.TimeSec, m))
+				if mf, r, ok := k.maker(m.Maker); ok {
+					if info, ok := r.SACCH(m); ok {
+						msgs = append(msgs, k.onMaker(f, mf, info, "SACCH", m.Raw))
+					}
+				}
 			}
 		} else {
 			k.asm.Reset()
@@ -286,9 +303,14 @@ func (k *link) Frame(f decoder.Frame, kd nxl1.Keyed) nx.Reading {
 		case h.Coded != nil && h.Coded.CRCOK:
 			b := nxl1.CodedBytes(h.Coded)
 			msgs = append(msgs, nv2Msg(f.TimeSec, mode.HalfName(i), b, k.tx.uc))
+			msgs = append(msgs, k.readNV2(f, mode.HalfName(i), i, b)...)
 		case h.Kind == nxl1.HalfTCH:
 			k.tx.voice++
 		}
+	}
+	if mode == l1.ModeNonVoice1 && len(p.Half[0].TCH) == l1.TCHBits && len(p.Half[1].TCH) == l1.TCHBits {
+		bits := append(append(make([]uint8, 0, 2*l1.TCHBits), p.Half[0].TCH...), p.Half[1].TCH...)
+		rd.Data = append(rd.Data, data.Frame{Ch: l1.DataChannel, No: f.No, TimeSec: f.TimeSec, Bits: bits, Tx: k.txNo})
 	}
 	if dirty {
 		k.h.EditStation(func(st *Station) { k.putExt(st) }, false)
@@ -425,7 +447,7 @@ func (k *link) Profile() nx.Profile {
 	}
 	st := k.h.Station()
 	if st.Maker > 0 {
-		impl = append(impl, fmt.Sprintf("製造者 %d", st.Maker))
+		impl = append(impl, "製造者 "+l3.MakerName(st.Maker))
 	} else if st.Maker == 0 {
 		impl = append(impl, "共通製造者番号")
 	}
@@ -435,7 +457,15 @@ func (k *link) Profile() nx.Profile {
 	} else if cd != "" {
 		p.Codec = cd
 	}
-	p.Keys = append(p.Keys, nx.KV{Name: "ホワイトニングの初期値", Value: fmt.Sprintf("0x%03X（規格の値）", l1.WhiteningInit)})
+	if v, ok := k.h.Init(); ok {
+		why := "規格の値"
+		if v != l1.WhiteningInit {
+			why = "規格の値ではない"
+		}
+		p.Keys = append(p.Keys, nx.KV{Name: "ホワイトニングの初期値", Value: fmt.Sprintf("0x%03X（%s）", v, why)})
+	} else {
+		p.Keys = append(p.Keys, nx.KV{Name: "ホワイトニングの初期値", Value: "当てている"})
+	}
 	ucs := make([]int, 0, len(k.groups))
 	for uc := range k.groups {
 		ucs = append(ucs, uc)
@@ -500,4 +530,111 @@ func printable(b []byte) string {
 		}
 	}
 	return string(out)
+}
+
+
+const maxKeyTries = 4
+
+func (k *link) maker(n int) (l3.MakerFormat, l3.MakerReader, bool) {
+	f, ok := l3.LookupMaker(n)
+	if !ok {
+		return l3.MakerFormat{}, nil, false
+	}
+	r := k.makers[n]
+	if r == nil {
+		r = f.New()
+		k.makers[n] = r
+	}
+	return f, r, true
+}
+
+func (k *link) makerCtx() l3.MakerCtx {
+	return l3.MakerCtx{Maker: k.tx.maker, UC: k.tx.uc, Call: k.tx.call}
+}
+
+func (k *link) readNV2(f decoder.Frame, ch string, half int, b [10]byte) []nx.MsgRec {
+	if len(l3.Makers()) == 0 {
+		return nil
+	}
+	ctx := k.makerCtx()
+	plain, note := b, ""
+	if ctx.Call == l3.CallCipher {
+		key, how := 0, ""
+		if ctx.UC >= 0 {
+			key, how = k.keyFor(ctx.UC)
+		}
+		if key == 0 && k.tx.keyTried < maxKeyTries {
+			k.tx.keyTried++
+			if n, mf, ok := l3.FindNV2Key(b, half, ctx); ok {
+				key, how = n, "当てた"
+				if ctx.UC >= 0 {
+					k.found[ctx.UC] = n
+					k.h.EditStation(func(st *Station) { k.putExt(st) }, true)
+				}
+				k.h.Logf("call", "info", "UC %d の秘話鍵 %d を非音声 2 の 1 枚から当てた（%s）", ctx.UC, n, mf.Format)
+				k.h.Note(fmt.Sprintf("key %d nv2 %s", n, mf.Format))
+			}
+		}
+		if key == 0 {
+			return nil
+		}
+		plain, note = l3.DescrambleNV2(b, key, half), fmt.Sprintf("秘話鍵 %d（%s）で外した", key, how)
+	}
+	try := func(n int) (nx.MsgRec, bool) {
+		mf, r, ok := k.maker(n)
+		if !ok {
+			return nx.MsgRec{}, false
+		}
+		info, ok := r.NV2(plain, ctx)
+		if !ok {
+			return nx.MsgRec{}, false
+		}
+		if note != "" {
+			info.Rows = append([]l3.Row{{Name: "秘話", Text: note}}, info.Rows...)
+		}
+		return k.onMaker(f, mf, info, ch, plain[:]), true
+	}
+	if m, ok := try(ctx.Maker); ok {
+		return []nx.MsgRec{m}
+	}
+	for _, mf := range l3.Makers() {
+		if mf.Maker == ctx.Maker {
+			continue
+		}
+		if m, ok := try(mf.Maker); ok {
+			return []nx.MsgRec{m}
+		}
+	}
+	return nil
+}
+
+func (k *link) onMaker(f decoder.Frame, mf l3.MakerFormat, info l3.MakerInfo, ch string, raw []byte) nx.MsgRec {
+	if c := info.CallText(); c != "" && c != k.tx.callText && info.Status < 0 {
+		k.tx.callText = c
+		k.h.Tx(func(tx *TxRec) bool { tx.Call = c; return true })
+	}
+	if info.Name != "" {
+		k.h.Tx(func(tx *TxRec) bool {
+			if tx.Ext["self_name"] == info.Name {
+				return false
+			}
+			tx.Ext["self_name"] = info.Name
+			return true
+		})
+	}
+	if info.Event {
+		ev := data.Event{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: mf.Format, Label: info.Summary, Raw: append([]byte(nil), raw...)}
+		if info.Src >= 0 {
+			ev.From = fmt.Sprintf("ID %d", info.Src)
+		}
+		for _, r := range info.Rows {
+			ev.Rows = append(ev.Rows, data.Row{Name: r.Name, Bits: r.Bits, Text: r.Text})
+		}
+		k.h.EmitData(ev)
+	}
+	who := l3.MakerName(mf.Maker)
+	return nx.MsgRec{TSec: f.TimeSec, U: k.tx.uc, Repeat: 1,
+		Tree: rowsTree(ch, info.What+"（製造者 "+who+"）", info.Rows),
+		Key:  fmt.Sprintf("%s/%s/%s", ch, mf.Format, info.Summary),
+		Msg:  nx.Message{Ch: ch, Type: -1, Name: info.What, Summary: info.Summary + "（製造者 " + who + "）", Maker: mf.Maker, Raw: append([]byte(nil), raw...)}}
 }

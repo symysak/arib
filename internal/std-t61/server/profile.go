@@ -102,13 +102,20 @@ func (p *Pipeline) profile(s *stationState) Profile {
 			out.Keys = append(out.Keys, KV{"WC（音声 TCH1）", fmt.Sprintf("%d（0x%03X）", v.lastWC, v.lastWC)})
 		}
 	}
-	if s.a1 != nil {
-		if wc, ok := s.a1.key.WC(); ok {
+	if a := s.a1; a != nil {
+		wc264, d264 := a.k264.WC()
+		if wc, ok := a.key.WC(); ok && a.ok292 {
 			impl = append(impl, "付録 1 U u292")
 			out.Keys = append(out.Keys, KV{"WC（データ U）", fmt.Sprintf("%d（0x%03X）", wc, wc)})
-		} else if wc, ok := s.a1.k264.WC(); ok {
+		} else if a.wc212 > 0 {
+			impl = append(impl, "付録 1 U u212")
+			out.Keys = append(out.Keys, KV{"WC（データ U・u212）", fmt.Sprintf("%d（0x%03X）", a.wc212, a.wc212)})
+			if d264 {
+				out.Keys = append(out.Keys, KV{"WC（データ U・u264）", fmt.Sprintf("%d（0x%03X）", wc264, wc264)})
+			}
+		} else if d264 {
 			impl = append(impl, "付録 1 U u264")
-			out.Keys = append(out.Keys, KV{"WC（データ U・u264）", fmt.Sprintf("%d（0x%03X）", wc, wc)})
+			out.Keys = append(out.Keys, KV{"WC（データ U・u264）", fmt.Sprintf("%d（0x%03X）", wc264, wc264)})
 		}
 	}
 	if s.ctl != nil {

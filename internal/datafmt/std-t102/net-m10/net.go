@@ -90,12 +90,16 @@ func probe(frames []data.Frame) (ok, n int) {
 
 type reader struct {
 	seen   map[string]float64
+	seenEv map[string]data.Event
 	last   map[byte]float64
 	beacon string
 	beaT   float64
+	beaEv  data.Event
 }
 
-func newReader() *reader { return &reader{seen: map[string]float64{}, last: map[byte]float64{}} }
+func newReader() *reader {
+	return &reader{seen: map[string]float64{}, seenEv: map[string]data.Event{}, last: map[byte]float64{}}
+}
 
 func hexs(b []byte) string { return strings.ToUpper(fmt.Sprintf("% x", b)) }
 
@@ -108,24 +112,28 @@ func (r *reader) Read(f data.Frame) []data.Event {
 	case IsBeacon(b):
 		k := hexs(b[1:])
 		if k == r.beacon && f.TimeSec-r.beaT < BeaconSec && f.TimeSec >= r.beaT {
-			return nil
+			return []data.Event{data.AgainOf(r.beaEv, f, 1)}
 		}
 		r.beacon, r.beaT = k, f.TimeSec
-		return []data.Event{{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name, From: "基地局",
+		r.beaEv = data.Event{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name, From: "基地局",
 			Label: fmt.Sprintf("定時の放送（種別 %02X）%s", kind(b), f.Route), Raw: b,
-			Rows: []data.Row{{Name: "計数（オクテット 0 の上位 2 ビット）", Text: fmt.Sprint(b[0] >> 6)}, {Name: "本体", Text: hexs(b[1:])}}}}
+			Rows: []data.Row{{Name: "計数（オクテット 0 の上位 2 ビット）", Text: fmt.Sprint(b[0] >> 6)}, {Name: "本体", Text: hexs(b[1:])}}}
+		return []data.Event{r.beaEv}
 	case IsReport(b):
 		k := hexs(b[1:])
 		if t, dup := r.seen[k]; dup && f.TimeSec-t < RepeatSec && f.TimeSec >= t {
-			return nil
+			return []data.Event{data.AgainOf(r.seenEv[k], f, 1)}
 		}
 		r.seen[k] = f.TimeSec
 		for kk, t := range r.seen {
 			if f.TimeSec-t > RepeatSec || f.TimeSec < t {
 				delete(r.seen, kk)
+				delete(r.seenEv, kk)
 			}
 		}
-		return []data.Event{r.report(f, b)}
+		ev := r.report(f, b)
+		r.seenEv[k] = ev
+		return []data.Event{ev}
 	}
 	return nil
 }

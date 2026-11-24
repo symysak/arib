@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -18,6 +19,7 @@ type Frame struct {
 	Route string
 	Slot int
 	Idle bool
+	Tx int64
 }
 
 type Kind string
@@ -66,6 +68,43 @@ type Event struct {
 	Wrap *Wrapped `json:"wrap,omitempty"`
 	Rows []Row    `json:"rows,omitempty"`
 	Raw []byte `json:"raw,omitempty"`
+	Count int `json:"count,omitempty"`
+	Again bool `json:"again,omitempty"`
+	RefNo      int64   `json:"-"`
+	RefTimeSec float64 `json:"-"`
+}
+
+func (e Event) N() int {
+	if e.Count > 0 {
+		return e.Count
+	}
+	return 1
+}
+
+func (e Event) Key() string {
+	no, t := e.No, e.TimeSec
+	if e.Again {
+		no, t = e.RefNo, e.RefTimeSec
+	}
+	return e.Format + "\x00" + e.From + "\x00" + e.Label + "\x00" + strconv.FormatInt(no, 10) + "\x00" + strconv.FormatFloat(t, 'g', -1, 64)
+}
+
+func Fresh(evs []Event) []Event {
+	var out []Event
+	for _, e := range evs {
+		if !e.Again {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func AgainOf(ev Event, f Frame, n int) Event {
+	if !ev.Again {
+		ev.RefNo, ev.RefTimeSec = ev.No, ev.TimeSec
+	}
+	ev.Again, ev.Count, ev.No, ev.TimeSec = true, n, f.No, f.TimeSec
+	return ev
 }
 
 type Reader interface {

@@ -4,7 +4,7 @@ import { el } from '../dom.js';
 
 export function init(store) {
   const bar = document.getElementById('l3-toolbar');
-  bar.append(el('span', { class: 'tiny muted', text: '1 行 = RT / MM / CC メッセージ。T61 の表で解釈できたものだけ並ぶ' }));
+  bar.append(el('span', { class: 'tiny muted', text: '1 行 = RT / MM / CC メッセージ（T61 の表で解釈できたもの）か、データの書式が読んだ出来事' }));
 
   makeLayerPane(store, {
     pane: 'l3',
@@ -19,12 +19,13 @@ export function init(store) {
       timeCol,
       freqCol(store),
       { name: '実体', class: 'badge info', get: (r) => r.entity },
+      { name: '件数', class: 'pill info', get: (r) => (r.repeat > 1 ? `×${r.repeat}` : '') },
       { name: '種別', class: 'grow tiny', get: (r) => r.name },
     ],
     detail: (r) => ({
-      title: `#${r.no} ${r.entity} ${r.name}${r.err ? '　' + r.err : ''}`,
+      title: `#${r.no} ${r.entity} ${r.name}${r.repeat > 1 ? `（×${r.repeat}）` : ''}${r.err ? '　' + r.err : ''}`,
       tree: r.tree, hex: r.raw_hex,
-      links: [el('span', { class: 'pill info', text: `← L2 #${r.l2_no}` })],
+      links: r.l2_no ? [el('span', { class: 'pill info', text: `← L2 #${r.l2_no}` })] : [],
     }),
   });
 }

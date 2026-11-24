@@ -115,7 +115,7 @@ type ControlKeyer struct {
 	fixed   bool
 	hint    int
 	hintN   int
-	seen    map[[ControlBits]uint8]bool
+	seen    map[[ControlBits]uint8]int
 	held    []ControlItem
 	misses  int
 	Judge    func(cands map[int][]ControlDecoded) (wc int, ok bool)
@@ -145,7 +145,7 @@ func NewControlKeyer(wc int) *ControlKeyer {
 }
 
 func (k *ControlKeyer) reset() {
-	k.seen, k.held, k.hintN, k.misses, k.distinct = map[[ControlBits]uint8]bool{}, nil, 0, 0, nil
+	k.seen, k.held, k.hintN, k.misses, k.distinct = map[[ControlBits]uint8]int{}, nil, 0, 0, nil
 }
 
 func (k *ControlKeyer) WC() (int, bool) { return k.wc, k.decided }
@@ -181,12 +181,15 @@ func (k *ControlKeyer) Feed(it ControlItem) []ControlDecoded {
 	if len(k.held) > 4*ControlLoseAfter {
 		k.held = k.held[1:]
 	}
-	if k.seen[it.Word.Info] {
-		return nil
+	if k.seen[it.Word.Info]++; k.seen[it.Word.Info] > 1 {
+		if k.seen[it.Word.Info] != ControlJudgeMin || len(k.distinct) >= ControlJudgeMin {
+			return nil
+		}
+		return k.judge()
 	}
-	k.seen[it.Word.Info] = true
 	k.distinct = append(k.distinct, it)
 	if len(k.distinct) > 4*ControlLoseAfter {
+		delete(k.seen, k.distinct[0].Word.Info)
 		k.distinct = k.distinct[1:]
 	}
 	if k.hint >= 0 {
@@ -196,9 +199,41 @@ func (k *ControlKeyer) Feed(it ControlItem) []ControlDecoded {
 			}
 		}
 	}
-	if k.Judge == nil || len(k.distinct) < ControlJudgeMin {
+	if len(k.distinct) < ControlJudgeMin && !k.repeated() {
 		return nil
 	}
+	return k.judge()
+}
+
+func (k *ControlKeyer) repeated() bool {
+	for _, n := range k.seen {
+		if n >= ControlJudgeMin {
+			return true
+		}
+	}
+	return false
+}
+
+func (k *ControlKeyer) judge() []ControlDecoded {
+	if k.Judge == nil {
+		return nil
+	}
+	for len(k.distinct) > 0 && (len(k.distinct) >= ControlJudgeMin || k.repeated()) {
+		cands, ok := k.cands()
+		if !ok {
+			delete(k.seen, k.distinct[0].Word.Info)
+			k.distinct = k.distinct[1:]
+			continue
+		}
+		if wc, ok := k.Judge(cands); ok {
+			return k.decide(wc)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (k *ControlKeyer) cands() (map[int][]ControlDecoded, bool) {
 	cands := map[int][]ControlDecoded{}
 	for wc := 0; wc < l1.A1Patterns; wc++ {
 		var ds []ControlDecoded
@@ -208,20 +243,15 @@ func (k *ControlKeyer) Feed(it ControlItem) []ControlDecoded {
 				ds = nil
 				break
 			}
-			ds = append(ds, ControlDecoded{h, wc, d})
+			for range k.seen[h.Word.Info] {
+				ds = append(ds, ControlDecoded{h, wc, d})
+			}
 		}
 		if ds != nil {
 			cands[wc] = ds
 		}
 	}
-	if len(cands) == 0 {
-		k.distinct = k.distinct[1:]
-		return nil
-	}
-	if wc, ok := k.Judge(cands); ok {
-		return k.decide(wc)
-	}
-	return nil
+	return cands, len(cands) > 0
 }
 
 func (k *ControlKeyer) decide(wc int) []ControlDecoded {

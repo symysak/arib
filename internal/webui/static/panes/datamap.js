@@ -47,6 +47,7 @@ export function init(store) {
   let userAt = 0;
   let askedGPS = false;
   let resolved = new Map();
+  let shown = [];
 
   function setRef(lat, lon, src) {
     ref = { lat, lon, src };
@@ -100,7 +101,7 @@ export function init(store) {
   const all = () => store.state.ext.position || [];
   const hasWrap = () => all().some((p) => p && p.wrap);
   const posOf = (p) => (p.pos ? [p.pos.lat, p.pos.lon] : resolved.get(p) || null);
-  const points = () => all().map(posOf).filter(Boolean);
+  const points = () => shown.map(posOf).filter(Boolean);
 
   function resolve() {
     const ws = all().filter((p) => p && p.wrap && !p.pos);
@@ -178,11 +179,14 @@ export function init(store) {
   }
 
   function draw() {
-    const evs = all();
-    if (!evs.length) return;
+    const every = all();
+    if (!every.length) return;
     pane.style.display = '';
-    const wraps = resolve();
-    if (wraps.length) {
+    resolve();
+    const evs = every.filter((p) => store.inScope(p.idx));
+    shown = evs;
+    const wraps = evs.filter((p) => p && p.wrap && !p.pos);
+    if (hasWrap()) {
       btnGPS.style.display = '';
       if (!askedGPS) askGPS(false);
       setText(refText, ref ? `基準点: ${ref.src} ${ref.lat.toFixed(3)}, ${ref.lon.toFixed(3)}（地図を動かすとその中心に付いて行く）`
@@ -195,7 +199,7 @@ export function init(store) {
       byFrom.get(k).push(p);
     }
     const latest = [...byFrom.values()].map((l) => l[l.length - 1]).sort((a, b) => b.t_sec - a.t_sec);
-    setText(sub, `送り元 ${byFrom.size} / 位置 ${evs.length} 件`);
+    setText(sub, `送り元 ${byFrom.size} / 位置 ${evs.length} 件${evs.length === every.length ? '' : `（全部で ${every.length} 件）`}`);
     syncList(list, latest, (p) => p.from || `${p.mhz}`, makeRow, (node, p) => {
       node._p = p;
       setText(node._parts.t, hms(p.t_sec));
@@ -203,7 +207,7 @@ export function init(store) {
       setText(node._parts.x, p.label);
     });
     try {
-      if (points().length || wraps.length) drawMap(byFrom, wraps);
+      if (map || points().length || wraps.length) drawMap(byFrom, wraps);
     } catch (e) {
       console.error('datamap', e);
     }

@@ -224,6 +224,13 @@ func (r *voiceRun) codecOpts(c voice.Codec, base voice.Options) voice.Options {
 	for k, v := range base {
 		o[k] = v
 	}
+	if c.Ch == t61voice.TCH {
+		if _, fixed := o["wc"]; !fixed {
+			if name, wc := r.ledgerPick(); name == c.Name {
+				o["hint"] = fmt.Sprintf("%s:%d", name, wc)
+			}
+		}
+	}
 	if c.Ch == t61voice.TCH1 {
 		if wc, ok := r.p.stationWC(r.mhz); ok {
 			o["wc"] = fmt.Sprint(wc)
@@ -260,6 +267,17 @@ func (r *voiceRun) setDataWC(wc int) {
 }
 
 func (r *voiceRun) ledgerHint() string {
+	name, wc := r.ledgerPick()
+	if name == "" {
+		return ""
+	}
+	if c, ok := codecByName(name); !ok || c.Ch != t61voice.TCH1 {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", name, wc)
+}
+
+func (r *voiceRun) ledgerPick() (string, int) {
 	name, wc := r.lastName, r.lastWC
 	if r.p.led != nil {
 		if n, w := r.p.led.Codec(r.mhz); n != "" && w >= 0 {
@@ -267,12 +285,9 @@ func (r *voiceRun) ledgerHint() string {
 		}
 	}
 	if name == "" || wc < 0 {
-		return ""
+		return "", -1
 	}
-	if c, ok := codecByName(name); !ok || c.Ch != t61voice.TCH1 {
-		return ""
-	}
-	return fmt.Sprintf("%s:%d", name, wc)
+	return name, wc
 }
 
 func (r *voiceRun) recordChoice(name string, wc int) {
@@ -298,7 +313,11 @@ func (r *voiceRun) start(codec *voice.Codec, name, why string) {
 	r.p.voiceCodec = name + "（" + why + "）"
 	r.p.mu.Unlock()
 	if codec != nil && codec.Ch == t61voice.TCH {
-		r.recordChoice(codec.Name, -1)
+		wc := -1
+		if name, w := r.ledgerPick(); name == codec.Name {
+			wc = w
+		}
+		r.recordChoice(codec.Name, wc)
 	}
 	if codec != nil && codec.Ch == t61voice.TCH1 && r.lastName == codec.Name && r.lastWC >= 0 {
 		r.recordChoice(codec.Name, r.lastWC)
@@ -391,7 +410,7 @@ func (r *voiceRun) newTracker(codec *voice.Codec, name string) *voice.Tracker {
 
 func (r *voiceRun) frame(f dec.Frame) {
 	isVoice := f.RICH.OK && f.RICH.IsVoice() && len(f.TCH) == 256 && !f.TCHIdle
-	vf := voice.Frame{Ch: t61voice.TCH, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH, Soft: f.TCHSoft}
+	vf := voice.Frame{Ch: t61voice.TCH, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH, Soft: f.TCHSoft, Init: f.TCHInit}
 	if f.A1RICH != nil {
 		isVoice = f.A1RICH.IsVoice() && len(f.TCH1) == 292
 		vf = voice.Frame{Ch: t61voice.TCH1, No: f.Number, TimeSec: f.TimeSec, Bits: f.TCH1, Soft: f.TCH1Soft, Sub: int(f.A1RICH.FN)}

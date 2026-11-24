@@ -166,7 +166,7 @@ func (v *Voice) Transport(f voice.Frame) (voice.Unit, bool, error) {
 		}
 	case decided && v.hold.Load():
 		v.gaveUp.Store(true)
-		out.Note = "秘話通信の秘話鍵が当たらなかった（この通話は鳴らさない）"
+		out.Note = "秘話通信の秘話鍵が当たらなかった（強化秘話の疑い: 10 秒ぶんの音声で、規格の 15 ビットの鍵 32767 通りのどれでも外れない。この通話は鳴らさない）"
 	}
 	return out, true, nil
 }

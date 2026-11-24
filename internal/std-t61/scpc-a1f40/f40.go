@@ -67,6 +67,8 @@ func Split(tch1 []float32) ([Sections]Section, bool) {
 	return out, true
 }
 
+func Viterbi(soft []float32, terminated bool) ([]uint8, int) { return decode(soft, terminated) }
+
 func decode(soft []float32, terminated bool) ([]uint8, int) {
 	const S = 1 << (codeK - 1)
 	n := len(soft) / 2

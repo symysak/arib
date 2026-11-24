@@ -88,12 +88,16 @@ type reader struct {
 	id       map[byte]byte
 	lastKey  string
 	lastT    float64
+	lastEv   data.Event
 	seenMsg  map[[4]byte]float64
+	msgEv    map[[4]byte]data.Event
 	talkT    map[byte]float64
+	talkEv   map[byte]data.Event
 }
 
 func newReader() *reader {
-	return &reader{id: map[byte]byte{}, seenMsg: map[[4]byte]float64{}, talkT: map[byte]float64{}}
+	return &reader{id: map[byte]byte{}, seenMsg: map[[4]byte]float64{}, msgEv: map[[4]byte]data.Event{},
+		talkT: map[byte]float64{}, talkEv: map[byte]data.Event{}}
 }
 
 func (r *reader) Read(f data.Frame) []data.Event {
@@ -106,11 +110,13 @@ func (r *reader) Read(f data.Frame) []data.Event {
 			return nil
 		}
 		if t, dup := r.seenMsg[b]; dup && f.TimeSec-t < 300 && f.TimeSec >= t {
-			return nil
+			return []data.Event{data.AgainOf(r.msgEv[b], f, 1)}
 		}
 		r.seenMsg[b] = f.TimeSec
-		return []data.Event{{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name,
-			Label: fmt.Sprintf("制御語 %X（読めない形）%s", b[:], f.Route), Raw: b[:]}}
+		ev := data.Event{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name,
+			Label: fmt.Sprintf("制御語 %X（読めない形）%s", b[:], f.Route), Raw: b[:]}
+		r.msgEv[b] = ev
+		return []data.Event{ev}
 	}
 	v14 := uint32(b[2]&0x3F)<<8 | uint32(b[3])
 	switch {
@@ -132,10 +138,11 @@ func (r *reader) Read(f data.Frame) []data.Event {
 	}
 	key := fmt.Sprintf("%02X/%d/%d", r.lat.b1, r.lat.v, r.lon.v)
 	if key == r.lastKey && f.TimeSec-r.lastT < RepeatSec && f.TimeSec >= r.lastT {
-		return nil
+		return []data.Event{data.AgainOf(r.lastEv, f, 1)}
 	}
 	r.lastKey, r.lastT = key, f.TimeSec
-	return []data.Event{r.position(f, b)}
+	r.lastEv = r.position(f, b)
+	return []data.Event{r.lastEv}
 }
 
 const TalkSec = 30
@@ -143,13 +150,15 @@ const TalkSec = 30
 func (r *reader) talker(f data.Frame, b [4]byte) []data.Event {
 	t, seen := r.talkT[b[1]]
 	r.talkT[b[1]] = f.TimeSec
-	if seen && f.TimeSec-t < TalkSec && f.TimeSec >= t {
-		return nil
+	if prev, ok := r.talkEv[b[1]]; seen && ok && f.TimeSec-t < TalkSec && f.TimeSec >= t {
+		return []data.Event{data.AgainOf(prev, f, 1)}
 	}
 	who := fmt.Sprintf("無線機 %02X", b[1])
-	return []data.Event{{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name, From: who,
+	ev := data.Event{Kind: data.KindMessage, No: f.No, TimeSec: f.TimeSec, Format: Name, From: who,
 		Label: fmt.Sprintf("%s が通話中 %s", who, f.Route), Raw: b[:],
-		Rows: []data.Row{{Name: "識別（2 オクテット目）", Bits: fmt.Sprintf("%08b", b[1]), Text: fmt.Sprintf("%02X", b[1])}}}}
+		Rows: []data.Row{{Name: "識別（2 オクテット目）", Bits: fmt.Sprintf("%08b", b[1]), Text: fmt.Sprintf("%02X", b[1])}}}
+	r.talkEv[b[1]] = ev
+	return []data.Event{ev}
 }
 
 func (r *reader) position(f data.Frame, b [4]byte) data.Event {

@@ -86,6 +86,7 @@ type Pipeline struct {
 	followed map[float64]bool
 	followAdd func(mhz float64) error
 	dataEvs map[string][]*DataEvent
+	dataL3 map[string]*L3Rec
 
 	out     func(Event)
 	started time.Time
@@ -132,7 +133,10 @@ func (p *Pipeline) Snapshot() Snapshot {
 	sn.Logs = append(sn.Logs, p.logs...)
 	sn.L1 = append(sn.L1, p.l1recs...)
 	sn.L2 = append(sn.L2, p.l2recs...)
-	sn.L3 = append(sn.L3, p.l3recs...)
+	for _, r := range p.l3recs {
+		cp := *r
+		sn.L3 = append(sn.L3, &cp)
+	}
 	sn.CallSeq = p.seq.Calls()
 	if p.cfg.Ext != nil {
 		sn.Ext = p.cfg.Ext.Snapshot()
@@ -751,8 +755,9 @@ func (p *Pipeline) storeL3(r *L3Rec) {
 	if len(p.l3recs) > maxL3 {
 		p.l3recs = p.l3recs[len(p.l3recs)-maxL3:]
 	}
+	cp := *r
 	p.mu.Unlock()
-	p.emit(Event{Type: "l3", L3: r})
+	p.emit(Event{Type: "l3", L3: &cp})
 }
 
 type asmKey struct {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/symysak/arib/internal/cliflag"
 	"github.com/symysak/arib/internal/credit"
@@ -15,6 +17,7 @@ import (
 	"github.com/symysak/arib/internal/std-t98/fsk4/cli"
 	"github.com/symysak/arib/internal/std-t98/fsk4/l1"
 	"github.com/symysak/arib/internal/std-t98/fsk4/l3"
+	t98 "github.com/symysak/arib/internal/std-t98/fsk4/server"
 )
 
 func main() {
@@ -40,6 +43,12 @@ func run(argv []string) int {
 	durSec := fs.Float64("duration", 0, "処理長 [s]（0 = 最後まで）")
 	quiet := fs.Bool("quiet", false, "フレーム毎の行を出さず、メッセージと集計だけ表示")
 	all := fs.Bool("all", false, "同じ内容の連続フレームも畳まずに全行出す")
+	initStr := fs.String("init", "", "ホワイトニングの初期値（WC。0x001〜0x1FF か 1〜511。既定は規格の値 0x0E4）")
+	var keyList []string
+	fs.Func("key", "秘話鍵（<鍵 1〜32767> か <ユーザコード>:<鍵>。何度でも。非音声 2 を外すのに使う）", func(v string) error {
+		keyList = append(keyList, v)
+		return nil
+	})
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `ARIB STD-T98 第 3 編（デジタル簡易無線・4 値 FSK）受信デコーダ
 
@@ -72,7 +81,22 @@ func run(argv []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "入力: %s\n", src.Describe())
 	d := decoder.New(decoder.Config{SampleRate: rate, OffsetHz: *offset * 1000, StartSec: *startSec})
-	p := &printer{asm: l3.NewAsm(), quiet: *quiet, all: *all}
+	keys, err := t98.ParseKeys(keyList)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	init := l1.WhiteningInit
+	if *initStr != "" {
+		n, err := strconv.ParseUint(strings.TrimSpace(*initStr), 0, 16)
+		if err != nil || n < 1 || n > 0x1FF {
+			fmt.Fprintf(os.Stderr, "-init %q は 0x001〜0x1FF\n", *initStr)
+			return 2
+		}
+		init = int(n)
+	}
+	p := &printer{asm: l3.NewAsm(), quiet: *quiet, all: *all, init: init, keys: keys, makers: map[int]l3.MakerReader{},
+		ctx: l3.MakerCtx{Maker: -1, UC: -1, Call: -1}, pend: [3]int{-1, -1, -1}}
 	chunk := int(rate * 0.1)
 	var total int64
 	limit := int64(*durSec * rate)
@@ -107,6 +131,12 @@ type printer struct {
 	rich, crc  int
 	crcAll     int
 	msgs       int
+	init   int
+	keys   map[int]int
+	found  map[int]int
+	makers map[int]l3.MakerReader
+	ctx  l3.MakerCtx
+	pend [3]int
 }
 
 func (p *printer) flush() {
@@ -121,7 +151,10 @@ func (p *printer) frame(f decoder.Frame) {
 	if f.Inertia {
 		return
 	}
-	ps := nxl1.Parse(nxl1.Dewhiten(f.Body[:], l1.WhiteningInit), l1.Dialect)
+	if f.First {
+		p.txStart()
+	}
+	ps := nxl1.Parse(nxl1.Dewhiten(f.Body[:], p.init), l1.Dialect)
 	r := l1.ReadRICH(ps.RICH)
 	mode := r.Mode()
 	if ps.Layout.Valid {
@@ -135,14 +168,25 @@ func (p *printer) frame(f decoder.Frame) {
 			p.crc++
 			u := l1.ReadUnit(s.Head)
 			line += fmt.Sprintf(" | SACCH %s", l3.TypeName(u.Type))
+			trust := true
 			if u.First {
 				call, uc, maker := l3.First(s.Data[:])
 				line += fmt.Sprintf(" UC %d 製造者 %d %s", uc, maker, l3.CallName(call))
+				if trust = p.accept(ps, mode, u, call, uc, maker); !trust {
+					line += "（1 回だけ。まだ信じない）"
+				}
 			} else {
 				line += fmt.Sprintf("（続き・残り %d）", u.Remain)
 			}
-			if m, ok := p.asm.Push(s.Head, s.Data[:]); ok {
+			if !trust {
+				p.asm.Reset()
+			} else if m, ok := p.asm.Push(s.Head, s.Data[:]); ok {
 				out = append(out, "SACCH "+m.Summary())
+				if r := p.maker(m.Maker); r != nil {
+					if info, ok := r.SACCH(m); ok {
+						out = append(out, "  製造者定義 "+info.Summary)
+					}
+				}
 			}
 		} else {
 			line += " | SACCH CRC誤り"
@@ -168,6 +212,7 @@ func (p *printer) frame(f decoder.Frame) {
 			} else {
 				line += fmt.Sprintf(" | %s 非音声 2 % X", name, b)
 				out = append(out, fmt.Sprintf("%s 非音声 2 % X", name, b))
+				out = append(out, p.nv2(b, i)...)
 			}
 		case h.Kind == nxl1.HalfTCH && h.TCH != nil:
 			line += " | " + name + " 音声"
@@ -192,6 +237,91 @@ func (p *printer) frame(f decoder.Frame) {
 		p.msgs++
 		fmt.Printf("%9.3fs   %s\n", f.TimeSec, o)
 	}
+}
+
+func (p *printer) accept(ps nxl1.Parsed, mode l1.Mode, u l1.Unit, call, uc, maker int) bool {
+	if call > l3.CallCipher || !(u.Type <= l3.TypeVoice || l3.IsMakerDef(u.Type) || u.Type == l3.TypeEnd) {
+		return false
+	}
+	now := [3]int{call, uc, maker}
+	prev := p.pend
+	p.pend = now
+	ok := now == [3]int{p.ctx.Call, p.ctx.UC, p.ctx.Maker} || now == prev || (mode == l1.ModeIdle && u.Type == l3.TypeEnd)
+	for _, h := range ps.Half {
+		ok = ok || (h.Coded != nil && h.Coded.CRCOK)
+	}
+	if ok {
+		p.ctx = l3.MakerCtx{Maker: maker, UC: uc, Call: call}
+	}
+	return ok
+}
+
+func (p *printer) txStart() {
+	p.ctx = l3.MakerCtx{Maker: -1, UC: -1, Call: -1}
+	p.pend = [3]int{-1, -1, -1}
+	p.asm.Reset()
+	for _, r := range p.makers {
+		r.TxStart()
+	}
+}
+
+func (p *printer) maker(n int) l3.MakerReader {
+	f, ok := l3.LookupMaker(n)
+	if !ok {
+		return nil
+	}
+	if p.makers[n] == nil {
+		p.makers[n] = f.New()
+	}
+	return p.makers[n]
+}
+
+func (p *printer) nv2(b [10]byte, half int) []string {
+	if len(l3.Makers()) == 0 {
+		return nil
+	}
+	var out []string
+	if p.ctx.Call == l3.CallCipher {
+		key, ok := p.keys[p.ctx.UC]
+		if !ok {
+			key, ok = p.keys[t98.AnyUC]
+		}
+		if !ok {
+			key, ok = p.found[p.ctx.UC]
+		}
+		if !ok {
+			n, f, hit := l3.FindNV2Key(b, half, p.ctx)
+			if !hit {
+				return nil
+			}
+			if p.found == nil {
+				p.found = map[int]int{}
+			}
+			key, p.found[p.ctx.UC] = n, n
+			out = append(out, fmt.Sprintf("  秘話鍵 %d を非音声 2 の 1 枚から当てた（UC %d・%s）", n, p.ctx.UC, f.Format))
+		}
+		b = l3.DescrambleNV2(b, key, half)
+		out = append(out, fmt.Sprintf("  外した非音声 2 % X（秘話鍵 %d）", b, key))
+	}
+	try := func(n int) bool {
+		r := p.maker(n)
+		if r == nil {
+			return false
+		}
+		info, ok := r.NV2(b, p.ctx)
+		if ok {
+			out = append(out, "  製造者定義 "+info.Summary)
+		}
+		return ok
+	}
+	if !try(p.ctx.Maker) {
+		for _, f := range l3.Makers() {
+			if f.Maker != p.ctx.Maker && try(f.Maker) {
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (p *printer) summary() {

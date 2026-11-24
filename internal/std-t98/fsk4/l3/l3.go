@@ -73,7 +73,11 @@ func (m Message) MakerDefHex() string {
 }
 
 func (m Message) Summary() string {
-	s := fmt.Sprintf("%s・UC %d・製造者 %d", m.Name, m.UC, m.Maker)
+	mk := fmt.Sprintf("%d", m.Maker)
+	if m.Maker != CommonMaker {
+		mk = MakerName(m.Maker)
+	}
+	s := fmt.Sprintf("%s・UC %d・製造者 %s", m.Name, m.UC, mk)
 	if m.Call != CallNormal {
 		s += "・" + CallName(m.Call)
 	}
@@ -116,7 +120,7 @@ func makerText(n int) string {
 	if n == CommonMaker {
 		return "0（共通製造者番号 = 製造者無指定）"
 	}
-	return fmt.Sprintf("%d", n)
+	return MakerName(n)
 }
 
 type Asm struct {

@@ -69,10 +69,15 @@ configure({
     { name: 'WC', cls: 'mono', get: (tx, st) => wcCell(st) },
     { name: 'UC', cls: 'mono', get: (tx) => (tx.u >= 0 ? String(tx.u) : '') },
     { name: '通話識別', get: (tx, st) => callCell((tx.ext || {}).cipher, ...txKey(tx, st)) },
+    { name: '呼', get: (tx) => {
+      const n = (tx.ext || {}).self_name;
+      const t = [tx.call, n].filter(Boolean).join(' ');
+      return t ? { text: t, title: `製造者定義から読んだ呼${tx.call ? `（${tx.call}）` : ''}${n ? `・自局名 ${n}` : ''}` } : '';
+    } },
   ],
   txSearch: (tx, st) => {
     const e = tx.ext || {};
-    return `${e.class || ''} ${e.ch || ''}ch ${tx.name || ''} ${e.licensee || ''} ${e.place || ''} uc${tx.u} ${tx.u} ${e.call || ''} 製造者${tx.maker} 鍵${e.cipher ? txKey(tx, st)[0] : ''}`;
+    return `${e.class || ''} ${e.ch || ''}ch ${tx.name || ''} ${e.licensee || ''} ${e.place || ''} uc${tx.u} ${tx.u} ${e.call || ''} ${tx.call || ''} ${e.self_name || ''} 製造者${tx.maker} 鍵${e.cipher ? txKey(tx, st)[0] : ''}`;
   },
   focusHead: (tx, st) => {
     const e = tx.ext || {};
@@ -91,8 +96,10 @@ configure({
       ['ユーザコード', tx.u >= 0 ? String(tx.u) : '-'],
       ['通話識別', e.call || '-'],
       ['秘話鍵', e.cipher ? (key > 0 ? `${key}（${how}）` : '分からない') : '-'],
-      ['製造者', tx.maker > 0 ? String(tx.maker) : tx.maker === 0 ? '共通（0）' : '-'],
+      ['製造者', e.maker_name || (tx.maker > 0 ? String(tx.maker) : tx.maker === 0 ? '共通（0）' : '-')],
     ];
+    if (tx.call) rows.push(['呼（製造者定義）', tx.call]);
+    if (e.self_name) rows.push(['自局名（製造者定義）', e.self_name]);
     if (g && g.radios && g.radios.length) rows.push(['同じグループの無線機', g.radios.join(' ')]);
     return rows;
   },

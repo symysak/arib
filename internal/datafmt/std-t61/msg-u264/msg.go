@@ -66,11 +66,19 @@ func probe(frames []data.Frame) (ok, n int) {
 }
 
 type reader struct {
-	pending map[string]float64
+	pending map[string]*pend
 	sent    map[string]float64
+	sentEv  map[string]data.Event
 }
 
-func newReader() *reader { return &reader{pending: map[string]float64{}, sent: map[string]float64{}} }
+type pend struct {
+	t float64
+	counted bool
+}
+
+func newReader() *reader {
+	return &reader{pending: map[string]*pend{}, sent: map[string]float64{}, sentEv: map[string]data.Event{}}
+}
 
 func expire(m map[string]float64, now, sec float64) {
 	for k, t := range m {
@@ -87,29 +95,56 @@ func (r *reader) Read(f data.Frame) []data.Event {
 	}
 	raw := bitpack.ToBytes(b)
 	h := fmt.Sprintf("%X", raw)
-	expire(r.pending, f.TimeSec, ConfirmSec)
+	for k, p := range r.pending {
+		if f.TimeSec-p.t > ConfirmSec || f.TimeSec < p.t {
+			delete(r.pending, k)
+		}
+	}
 	expire(r.sent, f.TimeSec, IdleRepeatSec)
+	for k := range r.sentEv {
+		if _, ok := r.sent[k]; !ok {
+			delete(r.sentEv, k)
+		}
+	}
 	w := words(b)
 	long := scpca1u264.IsLong(b)
-	switch {
-	case long:
-	case short(w):
-		if _, seen := r.pending[h]; !seen {
-			r.pending[h] = f.TimeSec
-			return nil
-		}
-	default:
-		return nil
-	}
 	key, repeat := h, float64(RepeatSec)
 	if counting(w) {
 		key, repeat = "count "+hexWords(append([]uint16{w[0]}, w[2:]...)), IdleRepeatSec
 	}
-	if t, dup := r.sent[key]; dup && f.TimeSec-t < repeat {
+	again := func(n int) []data.Event {
+		if t, dup := r.sent[key]; dup && f.TimeSec-t < repeat {
+			if ev, ok := r.sentEv[key]; ok {
+				return []data.Event{data.AgainOf(ev, f, n)}
+			}
+		}
 		return nil
 	}
+	first := 0
+	switch {
+	case long:
+	case short(w):
+		p := r.pending[h]
+		if p == nil {
+			evs := again(1)
+			r.pending[h] = &pend{t: f.TimeSec, counted: evs != nil}
+			return evs
+		}
+		if !p.counted {
+			first = 1
+		}
+		p.counted = true
+	default:
+		return nil
+	}
+	if t, dup := r.sent[key]; dup && f.TimeSec-t < repeat {
+		return again(1 + first)
+	}
 	r.sent[key] = f.TimeSec
-	return []data.Event{event(f, w, long, raw)}
+	ev := event(f, w, long, raw)
+	ev.Count = 1 + first
+	r.sentEv[key] = ev
+	return []data.Event{ev}
 }
 
 func hexWords(w []uint16) string {

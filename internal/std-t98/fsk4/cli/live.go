@@ -8,8 +8,10 @@ import (
 
 	"github.com/symysak/arib/internal/cliflag"
 	"github.com/symysak/arib/internal/credit"
+	"github.com/symysak/arib/internal/data"
 	"github.com/symysak/arib/internal/rec"
 	"github.com/symysak/arib/internal/std-t98/fsk4/chplan"
+	"github.com/symysak/arib/internal/std-t98/fsk4/l1"
 	"github.com/symysak/arib/internal/std-t98/fsk4/licensee"
 	"github.com/symysak/arib/internal/std-t98/fsk4/server"
 	"github.com/symysak/arib/internal/voice"
@@ -29,10 +31,12 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	noTCH := fs.Bool("no-tch", false, "TCH の生ビット（tch.bin / tch.idx）を書かない")
 	codec := fs.String("codec", "auto", "音声の符号器（auto / off / "+server.CodecNames()+"）。auto は TCH で各符号器の伝送路の検査を数えて選ぶ")
 	audioAGC := fs.Bool("audio-agc", true, "復号した音声の音量を局ごとにそろえる（自動利得調整。ゲート −70 dBFS・最大 +42 dB。false で素のまま）")
+	dataFmt := fs.String("data", data.Auto, "非音声 1 のデータの書式（auto / off / "+data.Names(l1.DataChannel)+"）。auto は書式の検査で選ぶ")
 	codecOpt := voice.Options{}
 	fs.Func("codec-opt", "名前で指定した符号器の設定 key=value（何度でも）", codecOpt.ParseOption)
 	lic := fs.String("licensees", "auto", "呼出名称 → 免許人の表（TSV か .tsv.gz。auto は data/musen/"+licensee.DefaultName+
 		" か実行ファイルの隣を探す・off で使わない）。免許局（呼出名称の先頭 1）の免許人・設置場所を出す")
+	wc := fs.String("wc", "", "ホワイトニングの初期値（WC）: 空 = 規格の値 0x0E4 に固定・auto = 0x0E4 を最初に試して 1〜511 から当てる・0x001〜0x1FF = その値。局ごとは -channels <MHz>:init=")
 	var keys []string
 	fs.Func("key", "秘話鍵 <1〜32767>（どのユーザコードにも）か <ユーザコード 0〜511>:<秘話鍵>（何度でも。無ければ秘話通信は符号器が通話の中で当てる）",
 		func(s string) error { keys = append(keys, s); return nil })
@@ -75,7 +79,7 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	plan, err := l.Plan()
+	plan, err := l.Plan("init")
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -88,6 +92,19 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 		return 2
 	}
 	notes, err := server.CheckCodec(*codec, codecOpt)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if err := data.Valid(l1.DataChannel, *dataFmt); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if _, _, err := server.ParseWC(*wc); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	opts, err := server.OptsFromChannels(plan.Channels)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -110,8 +127,8 @@ func Live(ctx context.Context, prog string, argv []string, stderr io.Writer) int
 	}
 	ec := l.Engine(plan)
 	ec.LogOut, ec.PreS, ec.NoIQ = stderr, *pre, *noIQ
-	m := server.NewMonitor(server.Config{Engine: ec, Codec: *codec, CodecOpt: codecOpt, Keys: km, Licensees: db,
-		NoTCH: *noTCH, AudioAGC: *audioAGC, LedgerDir: l.LedgerDir()})
+	m := server.NewMonitor(server.Config{Engine: ec, Codec: *codec, CodecOpt: codecOpt, Data: *dataFmt, Keys: km, Licensees: db,
+		NoTCH: *noTCH, AudioAGC: *audioAGC, LedgerDir: l.LedgerDir(), WC: *wc, Opts: opts})
 	fmt.Fprintln(stderr, credit.Line())
 	fmt.Fprintf(stderr, "ARIB STD-T98 第 3 編 モニタ: http://%s/\n", l.Addr)
 	fmt.Fprintf(stderr, "記録の保存先: %s/\n", rec.SystemDir(l.LogDir, server.System))

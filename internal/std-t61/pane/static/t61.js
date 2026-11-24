@@ -52,6 +52,8 @@ store.extend({
       touch('callseq');
     },
     l3(ev, { state, touch, trim }) {
+      const i = state.l3.findIndex((x) => x.no === ev.l3.no);
+      if (i >= 0) { state.l3[i] = ev.l3; touch('l3'); return; }
       state.l3.push(ev.l3);
       trim(state.l3, LIMIT.l3);
       touch('l3');
