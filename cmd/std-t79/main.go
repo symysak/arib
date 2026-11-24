@@ -11,10 +11,10 @@ import (
 	"github.com/symysak/arib/internal/cliflag"
 	"github.com/symysak/arib/internal/credit"
 	"github.com/symysak/arib/internal/iqsrc"
+	"github.com/symysak/arib/internal/rcr39qpsk/decoder"
+	"github.com/symysak/arib/internal/rcr39qpsk/l1"
+	"github.com/symysak/arib/internal/rcr39qpsk/l2"
 	"github.com/symysak/arib/internal/std-t79/cli"
-	"github.com/symysak/arib/internal/std-t79/decoder"
-	"github.com/symysak/arib/internal/std-t79/l1"
-	"github.com/symysak/arib/internal/std-t79/l2"
 	"github.com/symysak/arib/internal/std-t79/l3"
 )
 

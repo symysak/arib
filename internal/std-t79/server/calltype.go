@@ -4,12 +4,14 @@ package server
 import (
 	"fmt"
 	"math"
-	"strings"
 	"sync"
 
-	"github.com/symysak/arib/internal/std-t79/decoder"
+	"github.com/symysak/arib/internal/rcr39qpsk/decoder"
+	fam "github.com/symysak/arib/internal/rcr39qpsk/server"
 	"github.com/symysak/arib/internal/std-t79/l3"
 )
+
+const matchMHz = fam.GridHz / 2 / 1e6
 
 const partnerSec = 6.0
 
@@ -239,55 +241,52 @@ const (
 	modeCC
 )
 
-func (c *Channel) setMode(n int, ct l3.CallType, rank int, src string) {
-	cs := &c.calls[n]
-	if rank < cs.modeRank || (rank == cs.modeRank && ct.Name == cs.mode.Name) {
+func (l *link) setMode(n int, ct l3.CallType, rank int, src string) {
+	st := &l.st[n]
+	if rank < st.modeRank || (rank == st.modeRank && ct.Name == st.mode.Name) {
 		return
 	}
-	cs.mode, cs.modeRank, cs.modeSrc = ct, rank, src
-	if cs.on {
-		c.callEvent(n, "mode", fmt.Sprintf("%s（%s）%s", ct.Name, src, ct.Downlink))
-		c.logf(n, "call", "info", "ST#%d 通信種別 %s（%s）", n, ct.Name, src)
+	st.mode, st.modeRank, st.modeSrc = ct, rank, src
+	if l.h.CallOn(n) {
+		l.h.CallEvent(n, "mode", fmt.Sprintf("%s（%s）%s", ct.Name, src, ct.Downlink))
+		l.h.Logf(n, "call", "info", "ST#%d 通信種別 %s（%s）", n, ct.Name, src)
 	}
-	c.mu.Lock()
-	c.car.Slots[n].Mode = ct.Name
-	c.car.Slots[n].ModeNote = ct.Downlink
-	c.mu.Unlock()
+	l.h.SetMode(n, ct.Name, ct.Downlink)
 }
 
-func (c *Channel) modeFromCall(n int, call *l3.Call, ctl float64, src string) {
+func (l *link) modeFromCall(n int, call *l3.Call, ctl float64, src string) {
 	if call == nil {
 		return
 	}
-	ct, ok := l3.ClassifyCall(call, c.std.nets.groupHalf(ctl, c.orgName()))
+	ct, ok := l3.ClassifyCall(call, l.sh.nets.groupHalf(ctl, l.h.Org()))
 	if !ok {
 		return
 	}
-	c.setMode(n, ct, modeCC, src)
+	l.setMode(n, ct, modeCC, src)
 }
 
-func (c *Channel) modeAtStart(n int) {
-	if ct, ok := c.std.nets.special(c.cfg.MHz, n); ok {
-		c.setMode(n, ct, modeSpecial, "報知情報・システム拡張情報")
+func (l *link) modeAtStart(n int) {
+	if ct, ok := l.sh.nets.special(l.h.MHz(), n); ok {
+		l.setMode(n, ct, modeSpecial, "報知情報・システム拡張情報")
 	}
-	for m := range c.calls {
-		if m != n && c.calls[m].on && math.Abs(c.calls[m].t0-c.calls[n].t0) < partnerSec {
-			c.calls[m].stats.partner = true
-			c.calls[n].stats.partner = true
+	for m := range l.st {
+		if m != n && l.h.CallOn(m) && math.Abs(l.h.CallT0(m)-l.h.CallT0(n)) < partnerSec {
+			l.st[m].stats.partner = true
+			l.st[n].stats.partner = true
 		}
 	}
 }
 
-func (c *Channel) modeInfer(n int) {
-	cs := &c.calls[n]
-	if cs.modeRank > modeInferred {
+func (l *link) modeInfer(n int) {
+	st := &l.st[n]
+	if st.modeRank > modeInferred {
 		return
 	}
-	if ct, ok := cs.stats.infer(); ok {
-		c.setMode(n, ct, modeInferred, "同期バースト・B/I・音声の途切れ方から")
+	if ct, ok := st.stats.infer(); ok {
+		l.setMode(n, ct, modeInferred, "同期バースト・B/I・音声の途切れ方から")
 	}
 }
 
-func (cs *callState) modeLabel() string {
-	return strings.TrimSpace(cs.mode.Name)
-}
+const callIdleFrames = 25
+
+var _ fam.Link = (*link)(nil)

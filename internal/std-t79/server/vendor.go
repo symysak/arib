@@ -9,10 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/symysak/arib/internal/rcr39qpsk/decoder"
+	"github.com/symysak/arib/internal/rcr39qpsk/l2"
 	"github.com/symysak/arib/internal/rec"
-	"github.com/symysak/arib/internal/std-t79/decoder"
-	"github.com/symysak/arib/internal/std-t79/l1"
-	"github.com/symysak/arib/internal/std-t79/l2"
 	"github.com/symysak/arib/internal/std-t79/l3"
 )
 
@@ -60,31 +59,20 @@ func (v *vendorFile) write(logDir, line string) {
 	f.WriteString(line)
 }
 
-func (c *Channel) downMHz() float64 {
-	if c.up != nil {
-		return c.cfg.MHz - UpOffsetMHz
-	}
-	return c.cfg.MHz
-}
-
-func (c *Channel) makerNum() int {
-	c.mu.Lock()
-	n := c.maker
-	c.mu.Unlock()
-	if n == 0 && c.up != nil {
-		n = c.std.nets.makerAt(c.downMHz())
+func (l *link) makerNum() int {
+	n := l.maker
+	if n == 0 && l.h.Up() {
+		n = l.sh.nets.makerAt(l.h.DownMHz())
 	}
 	return n
 }
 
-func (c *Channel) setMaker(n int, why string) {
+func (l *link) setMaker(n int, why string) {
 	if n <= 0 {
 		return
 	}
-	c.mu.Lock()
-	old := c.maker
-	c.maker = n
-	c.mu.Unlock()
+	old := l.maker
+	l.maker = n
 	if old == n {
 		return
 	}
@@ -92,8 +80,8 @@ func (c *Channel) setMaker(n int, why string) {
 	if l3.HasVendor(n) {
 		tail = "製造者ごとの独自の読みを使う"
 	}
-	c.logf(0, "net", "info", "網の製造者 %s（%s）: %s", makerLabel(n), why, tail)
-	c.updateVendorInfo()
+	l.h.Logf(0, "net", "info", "網の製造者 %s（%s）: %s", makerLabel(n), why, tail)
+	l.updateVendorInfo()
 }
 
 func makerLabel(n int) string {
@@ -103,50 +91,48 @@ func makerLabel(n int) string {
 	return fmt.Sprint(n)
 }
 
-func (c *Channel) updateVendorInfo() {
-	n := c.makerNum()
+func (l *link) updateVendorInfo() {
+	n := l.makerNum()
 	t := ""
 	if n > 0 {
 		t = makerLabel(n)
 		if !l3.HasVendor(n) {
 			t += "（独自の読み無し）"
 		}
-		if c.vend.clockText != "" {
-			t += "・" + c.vend.clockText
+		if l.vend.clockText != "" {
+			t += "・" + l.vend.clockText
 		}
 	}
-	c.mu.Lock()
-	c.car.Vendor = t
-	c.mu.Unlock()
+	l.h.SetVendor(t)
 }
 
-func (c *Channel) parseL3(info []byte, dir int) l3.Signal {
-	maker := c.makerNum()
+func (l *link) parseL3(info []byte, dir int) l3.Signal {
+	maker := l.makerNum()
 	x := l3.ParseCtx(info, l3.Ctx{Dir: dir, Maker: maker})
-	if maker != 0 || c.up != nil {
+	if maker != 0 || l.h.Up() {
 		return x
 	}
 	for _, m := range x.Messages {
 		if b := m.Broadcast; b != nil && b.System != nil && b.System.Maker > 0 {
-			c.setMaker(b.System.Maker, "網番号")
+			l.setMaker(b.System.Maker, "網番号")
 			return l3.ParseCtx(info, l3.Ctx{Dir: dir, Maker: b.System.Maker})
 		}
 	}
 	return x
 }
 
-func (c *Channel) actOnVendorData(s *decoder.Slot, ch string, f l2.Frame, raw []byte, sig l3.Signal) {
+func (l *link) actOnVendorData(s *decoder.Slot, ch string, f l2.Frame, raw []byte, sig l3.Signal) {
 	for _, m := range sig.Messages {
 		if m.Clock != nil {
-			c.vendorClock(s, m.Clock)
+			l.vendorClock(s, m.Clock)
 		}
 		if m.Unknown() {
-			c.vendorRecord(s, ch, f, raw, m)
+			l.vendorRecord(s, ch, f, raw, m)
 		}
 	}
 }
 
-func (c *Channel) vendorRecord(s *decoder.Slot, ch string, f l2.Frame, raw []byte, m l3.Message) {
+func (l *link) vendorRecord(s *decoder.Slot, ch string, f l2.Frame, raw []byte, m l3.Message) {
 	var what []string
 	for _, v := range m.Vendor {
 		if !v.Known {
@@ -154,36 +140,36 @@ func (c *Channel) vendorRecord(s *decoder.Slot, ch string, f l2.Frame, raw []byt
 		}
 	}
 	w := strings.Join(what, "; ")
-	if c.vend.seen == nil {
-		c.vend.seen = map[string]float64{}
+	if l.vend.seen == nil {
+		l.vend.seen = map[string]float64{}
 	}
-	maker := c.makerNum()
+	maker := l.makerNum()
 	same := fmt.Sprintf("%d/%s/%x", maker, w, m.Raw)
 	kind := fmt.Sprintf("%d/%s/%d/%s", maker, m.Entity, m.Type, w)
-	if t, ok := c.vend.seen[same]; ok && s.TSec-t < vendorSameSec {
+	if t, ok := l.vend.seen[same]; ok && s.TSec-t < vendorSameSec {
 		return
 	}
-	if t, ok := c.vend.seen[kind]; ok && s.TSec-t < vendorKindSec {
+	if t, ok := l.vend.seen[kind]; ok && s.TSec-t < vendorKindSec {
 		return
 	}
-	c.vend.seen[same], c.vend.seen[kind] = s.TSec, s.TSec
-	if len(c.vend.seen) > 2048 {
-		for k, t := range c.vend.seen {
+	l.vend.seen[same], l.vend.seen[kind] = s.TSec, s.TSec
+	if len(l.vend.seen) > 2048 {
+		for k, t := range l.vend.seen {
 			if s.TSec-t > vendorSameSec {
-				delete(c.vend.seen, k)
+				delete(l.vend.seen, k)
 			}
 		}
 	}
 	line := fmt.Sprintf("%s\t%.4f\t%s\t%d\t%s\t%s\t%s\t0x%02X\t%s\t%s\t%s\n",
-		c.sink.StreamTime().Format(time.RFC3339), c.cfg.MHz, makerLabel(c.makerNum()), s.Num, ch, f.Addr.Key(), m.Entity, m.Type, w,
+		l.h.StreamTime().Format(time.RFC3339), l.h.MHz(), makerLabel(l.makerNum()), s.Num, ch, f.Addr.Key(), m.Entity, m.Type, w,
 		hexUpper(m.Raw), hexUpper(raw))
-	c.std.vendorOut.write(c.std.cfg.LogDir, line)
+	l.sh.vendor.write(l.h.LogDir(), line)
 }
 
 func hexUpper(b []byte) string { return strings.ToUpper(fmt.Sprintf("%x", b)) }
 
-func (c *Channel) vendorClock(s *decoder.Slot, k *l3.Clock) {
-	now := c.sink.StreamTime()
+func (l *link) vendorClock(s *decoder.Slot, k *l3.Clock) {
+	now := l.h.StreamTime()
 	off := k.Sec - (now.Hour()*3600 + now.Minute()*60 + now.Second())
 	switch {
 	case off > 43200:
@@ -199,32 +185,32 @@ func (c *Channel) vendorClock(s *decoder.Slot, k *l3.Clock) {
 	vendor := l3.MakerName(k.ByMaker)
 	text := fmt.Sprintf("%s %s（受信の時刻との差 %s）", k.What, k.Text, offText(off))
 	if k.PerCall {
-		if s.Num < 0 || s.Num >= len(c.calls) {
+		if s.Num < 0 || s.Num >= len(l.st) {
 			return
 		}
-		cs := &c.calls[s.Num]
+		cs := &l.st[s.Num]
 		if cs.vclock == k.Text {
 			return
 		}
 		cs.vclock = k.Text
-		c.note(s.Num, fmt.Sprintf("vendor_clock %s（独自・%s・推定）", text, vendor))
-		c.logf(s.Num, "call", "info", "ST#%d %s（独自・%s・推定）", s.Num, text, vendor)
+		l.h.Note(s.Num, fmt.Sprintf("vendor_clock %s（独自・%s・推定）", text, vendor))
+		l.h.Logf(s.Num, "call", "info", "ST#%d %s（独自・%s・推定）", s.Num, text, vendor)
 		return
 	}
 	slack := max(vendorClockSlack, 2*k.Step)
 	near := func(a, b int) bool { return abs(a-b) <= slack }
-	v := &c.vend
+	v := &l.vend
 	if v.pendN > 0 && near(off, v.pendOff) {
 		v.pendN++
 	} else {
 		v.pendOff, v.pendN = off, 1
 	}
 	if v.pendN >= 2 && (!v.clockSeen || !near(off, v.clockOff)) {
-		c.logf(s.Num, "net", "info", "%s（独自・%s・推定）", text, vendor)
+		l.h.Logf(s.Num, "net", "info", "%s（独自・%s・推定）", text, vendor)
 		v.clockSeen, v.clockOff = true, off
 	}
 	v.clockText = fmt.Sprintf("%s %s（受信の時刻 %s）", k.What, k.Text, offText(off))
-	c.updateVendorInfo()
+	l.updateVendorInfo()
 }
 
 func abs(v int) int {
@@ -248,19 +234,15 @@ func offText(off int) string {
 	return fmt.Sprintf("%s%d 秒", sign, off)
 }
 
-func (c *Channel) rchText(info []uint8, up bool) string {
-	return l1.RCHVendorText(c.makerNum(), info, up)
-}
-
-func (c *Channel) markData(n int, call *l3.Call) {
-	if call == nil || len(call.Bearers) == 0 || !call.Bearers[0].NonVoice || n < 0 || n >= len(c.calls) {
+func (l *link) markData(n int, call *l3.Call) {
+	if call == nil || len(call.Bearers) == 0 || !call.Bearers[0].NonVoice || n < 0 || n >= len(l.st) {
 		return
 	}
-	cs := &c.calls[n]
+	cs := &l.st[n]
 	if cs.data {
 		return
 	}
 	cs.data = true
-	c.note(n, "data 非音声の通信（伝達能力 "+call.Bearers[0].Text+"）: TCH はデータとして tch.bin に残し、音声の符号器は通さない")
-	c.logf(n, "call", "info", "ST#%d 非音声の通信（データ）: %s", n, call.Bearers[0].Text)
+	l.h.Note(n, "data 非音声の通信（伝達能力 "+call.Bearers[0].Text+"）: TCH はデータとして tch.bin に残し、音声の符号器は通さない")
+	l.h.Logf(n, "call", "info", "ST#%d 非音声の通信（データ）: %s", n, call.Bearers[0].Text)
 }

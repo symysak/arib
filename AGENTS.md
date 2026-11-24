@@ -29,6 +29,7 @@ See `LEGAL.md`. Do not add features that publish or share received content, keep
 go build ./cmd/std-t86
 go build ./cmd/std-t115/qpsknarrow
 go build ./cmd/std-t79
+go build -o std-39-qpsk ./cmd/std-39/qpsk
 go build ./cmd/std-t61
 go build ./cmd/std-t102
 go build -o std-t98-fsk4 ./cmd/std-t98/fsk4

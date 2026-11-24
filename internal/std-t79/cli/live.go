@@ -10,8 +10,8 @@ import (
 
 	"github.com/symysak/arib/internal/cliflag"
 	"github.com/symysak/arib/internal/credit"
+	"github.com/symysak/arib/internal/rcr39qpsk/l1"
 	"github.com/symysak/arib/internal/rec"
-	"github.com/symysak/arib/internal/std-t79/l1"
 	"github.com/symysak/arib/internal/std-t79/server"
 	"github.com/symysak/arib/internal/voice"
 	"net/http"
